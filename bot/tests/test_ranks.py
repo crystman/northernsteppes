@@ -220,3 +220,21 @@ def test_gaps_names_the_missing_styles():
     m = sheet(waiver=True, dues=True, weapons={"Single Sword": 1, "Rock": 1})
     text = " ".join(gaps(m))
     assert "Sword & Board" in text and "Javelin" in text
+
+
+def test_gaps_offers_the_non_combat_route_to_harbinger():
+    """A Savage who got there through professions must not be told the only
+    way up is the four combat styles -- the non-combat route reaches
+    Harbinger too."""
+    m = sheet(waiver=True, dues=True, veteran_garb=True,
+              professions={"Cook": 1})
+    text = " ".join(gaps(m))
+    assert "non-combat profession" in text
+
+
+def test_gaps_offers_both_routes_to_a_combat_savage():
+    m = sheet(waiver=True, dues=True, veteran_garb=True,
+              weapons={s: 1 for s in BASIC_STYLES})
+    text = " ".join(gaps(m))
+    assert "non-combat profession" in text
+    assert "Archery" in text, "should name the styles still unproficient"

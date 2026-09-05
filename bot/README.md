@@ -83,6 +83,30 @@ Trust auth means anything on this machine can connect to that port without a
 password. That is fine for a throwaway instance bound to 127.0.0.1 holding
 nothing but test fixtures; do not configure a real database this way.
 
+## Running the bot
+
+```bash
+cd bot
+DISCORD_TOKEN=... .venv/Scripts/python.exe -m northernsteppes_bot
+```
+
+It refuses to start rather than starting wrong: no token, a missing
+`content/members` directory, or an empty roster each exit 1 with an
+explanation. A bot that connects and quietly finds zero members looks healthy
+in Railway's logs while answering every question incorrectly.
+
+Commands are registered to the guild rather than globally, so they appear
+immediately instead of taking up to an hour to propagate.
+
+### Where read commands get their data
+
+From the member files, not the database. Nothing writes to the database yet
+except the bootstrap import, which reads those same files, so the two cannot
+disagree -- and the fields the rank rules lean on most (professions, and the
+counters behind the class ladders) are deliberately absent from the database
+while that system is reworked. When writes start flowing through Postgres this
+becomes a query and `MemberDirectory` loses its file path.
+
 ## Layout
 
 ```
@@ -92,7 +116,11 @@ bot/
 │   ├── db.py         connection pool, migration runner
 │   ├── importer.py   bootstrap import from content/members/
 │   ├── members.py    parse member files via tomlkit
-│   └── ranks.py      rank and class-ladder rules
+│   ├── ranks.py      rank and class-ladder rules
+│   ├── roster.py     in-memory member lookup
+│   ├── views.py      command responses, as pure functions
+│   ├── bot.py        discord client and command handlers
+│   └── __main__.py   entry point
 ├── migrations/       plain .sql, applied once each in filename order
 └── tests/
 ```

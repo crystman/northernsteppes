@@ -185,22 +185,21 @@ def gaps(sheet: MemberSheet) -> list[str]:
         return needs
 
     if current == 2:
+        # Harbinger needs veteran garb, plus either a second-rank non-combat
+        # profession or proficiency in every combat style. Both routes reach
+        # it, so this must offer both -- somebody who became Savage through
+        # professions is not required to take up the sword.
         needs = []
         if not sheet.veteran_garb:
             needs.append("Own veteran level garb")
-        if not has_basic_styles(sheet):
-            # See the note in rank(): Harbinger is unreachable from the
-            # professions route as currently implemented.
-            missing = [s for s in BASIC_STYLES if sheet.weapon(s) == 0]
-            needs.append("Become proficient in: " + ", ".join(missing))
-            return needs
         if not any(v >= 2 for v in sheet.professions.values()):
             unproficient = sorted(w for w, v in sheet.weapons.items() if v == 0)
+            alternative = "Reach Adept in a non-combat profession"
             if unproficient:
-                needs.append(
-                    "Reach Adept in a non-combat profession, or become "
-                    "proficient in: " + ", ".join(unproficient)
+                alternative += (
+                    ", or become proficient in: " + ", ".join(unproficient)
                 )
+            needs.append(alternative)
         return needs
 
     return []
