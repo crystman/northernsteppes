@@ -72,9 +72,15 @@ def test_sync_enabled_still_dry_runs_by_default(monkeypatch):
     assert cfg.may_write_to_git is False
 
 
-def test_live_writes_require_both_switches(monkeypatch):
+def test_live_writes_require_a_destination_too(monkeypatch):
+    """Turning the switches on is not enough without somewhere to write: a
+    sync with no repository or token would silently do nothing."""
     monkeypatch.setenv("SYNC_ENABLED", "true")
     monkeypatch.setenv("DRY_RUN", "false")
+    assert Config.from_env().may_write_to_git is False
+
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("SYNC_REPO", "o/r")
     assert Config.from_env().may_write_to_git is True
 
 
@@ -189,3 +195,50 @@ def test_an_explicit_guild_is_not_flagged(monkeypatch):
     monkeypatch.setenv("DISCORD_GUILD_ID", "1279582837749842092")
     cfg = Config.from_env()
     assert cfg.guild_is_defaulted is False
+
+
+# --- the sync's three switches ---------------------------------------------
+
+SYNC_VARS = ("GITHUB_TOKEN", "SYNC_REPO", "SYNC_ENABLED", "DRY_RUN")
+
+
+def _sync_env(monkeypatch, **overrides):
+    for name in SYNC_VARS:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in overrides.items():
+        monkeypatch.setenv(name, value)
+    return Config.from_env()
+
+
+def test_a_fresh_deployment_cannot_write_to_git(monkeypatch):
+    assert _sync_env(monkeypatch).may_write_to_git is False
+
+
+def test_enabling_sync_is_not_enough(monkeypatch):
+    """DRY_RUN still defaults on."""
+    cfg = _sync_env(monkeypatch, SYNC_ENABLED="true",
+                    GITHUB_TOKEN="x", SYNC_REPO="o/r")
+    assert cfg.may_write_to_git is False
+
+
+def test_clearing_dry_run_is_not_enough(monkeypatch):
+    """Without a token and repo there is nowhere to write."""
+    cfg = _sync_env(monkeypatch, SYNC_ENABLED="true", DRY_RUN="false")
+    assert cfg.sync_configured is False
+    assert cfg.may_write_to_git is False
+
+
+def test_a_token_without_a_repo_is_not_configured(monkeypatch):
+    cfg = _sync_env(monkeypatch, SYNC_ENABLED="true", DRY_RUN="false",
+                    GITHUB_TOKEN="x")
+    assert cfg.may_write_to_git is False
+
+
+def test_all_three_together_allow_writing(monkeypatch):
+    cfg = _sync_env(monkeypatch, SYNC_ENABLED="true", DRY_RUN="false",
+                    GITHUB_TOKEN="x", SYNC_REPO="o/r")
+    assert cfg.may_write_to_git is True
+
+
+def test_sync_branch_defaults_to_main(monkeypatch):
+    assert _sync_env(monkeypatch).sync_branch == "main"

@@ -61,6 +61,9 @@ class Config:
     dry_run: bool
     sync_debounce_seconds: int
     _guild_was_defaulted: bool
+    github_token: str | None
+    sync_repo: str | None
+    sync_branch: str
     members_dir: str | None
     members_repo: str
     members_ref: str
@@ -81,6 +84,9 @@ class Config:
             sync_enabled=_flag("SYNC_ENABLED", False),
             dry_run=_flag("DRY_RUN", True),
             sync_debounce_seconds=_int_or_none("SYNC_DEBOUNCE_SECONDS") or 300,
+            github_token=os.environ.get("GITHUB_TOKEN", "").strip() or None,
+            sync_repo=os.environ.get("SYNC_REPO", "").strip() or None,
+            sync_branch=os.environ.get("SYNC_BRANCH", "").strip() or "main",
             members_dir=os.environ.get("MEMBERS_DIR", "").strip() or None,
             members_repo=(
                 os.environ.get("MEMBERS_REPO", "").strip() or DEFAULT_MEMBERS_REPO
@@ -119,9 +125,19 @@ class Config:
         return self.leadership_role_id is not None and self.database_url is not None
 
     @property
+    def sync_configured(self) -> bool:
+        """Whether the sync has somewhere to write and a way to authenticate."""
+        return bool(self.github_token and self.sync_repo)
+
+    @property
     def may_write_to_git(self) -> bool:
-        """Whether the sync job may actually push commits."""
-        return self.sync_enabled and not self.dry_run
+        """Whether the sync job may actually push commits.
+
+        Three switches, all of which must line up: the sync turned on, dry run
+        turned off, and a repository and token configured. A fresh deployment
+        satisfies none of them.
+        """
+        return self.sync_enabled and not self.dry_run and self.sync_configured
 
     def describe_posture(self) -> str:
         """One-line summary for the startup log, so the running mode is
