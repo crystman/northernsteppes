@@ -106,20 +106,20 @@ access, so they are safe to point at a scratch server.
 1. **Invite the bot.** In the Discord developer portal, under OAuth2 → URL
    Generator, tick the `bot` and `applications.commands` scopes, then `Send
    Messages` under bot permissions. Open the generated URL and pick your
-   server. Or build it by hand, substituting the Application ID from General
-   Information:
+   server. Or use this link directly — the Application ID is public and
+   appears in every invite URL:
 
    ```
-   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&permissions=2048&scope=bot+applications.commands
+   https://discord.com/oauth2/authorize?client_id=1545624444402139146&permissions=2048&scope=bot+applications.commands
    ```
 
    No privileged intents are needed, so nothing requires Discord's approval.
 
 2. **Point it at that server.** Commands register to one guild, and
-   `DISCORD_GUILD_ID` defaults to Northern Steppes. Set it to your test
-   server's ID or the bot will try to register commands in a guild it is not
-   in and fail with a permissions error. Enable Developer Mode in Discord,
-   then right-click the server icon → Copy Server ID.
+   `DISCORD_GUILD_ID` defaults to Northern Steppes (`183746241098678273`), so
+   set it to your test server's ID — otherwise the bot tries to register
+   commands in a guild it is not in and fails with a permissions error. Enable
+   Developer Mode in Discord, then right-click the server icon → Copy Server ID.
 
 3. **Run it locally**, from a repo checkout so it can read `content/members`:
 
