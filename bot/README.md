@@ -17,6 +17,12 @@ python -m venv .venv
 Copy `.env.example` to `.env` and fill it in. `.env` is gitignored; on Railway
 these are service variables instead. Nothing in it is needed to run the tests.
 
+`DISCORD_TOKEN` is the **bot token**, from the developer portal's **Bot** tab
+(Reset Token) — *not* the Client Secret on the OAuth2 tab, which is for logging
+users into a web app and will fail here with "Improper token has been passed".
+Discord shows a bot token only once, at creation or reset, so if it was not
+saved then it has to be reset. Neither value belongs in this repo.
+
 ## Tests
 
 ```bash
