@@ -73,6 +73,21 @@ insert into sync_state (id) values (1) on conflict (id) do nothing;
 
 -- Seed the permitted weapon styles. These match content/proficiencies/combat-styles.md
 -- and the [extra.weapons] tables in content/members/_*.md exactly -- 11 in each.
+--
+-- content/proficiencies/classes.md gates its prestige classes on four names
+-- that appear nowhere else, which look like omissions but are not. Confirmed
+-- with leadership, none of them belongs here:
+--
+--   Florentine  the older name for Dual Wield, which is already seeded.
+--               Adding it would create two proficiencies for one skill.
+--   Glaive      a large red weapon, not a style of its own.
+--   Red, Blue   weapon construction categories -- what a weapon IS, per the
+--               "red weapons" and "blue weapons" sections of
+--               content/resources/gear.md -- not a skill a member holds.
+--
+-- classes.md uses Florentine and Red as though they were proficiencies, e.g.
+-- "Adept in 2 Proficiencies (Red/Florentine/Polearm & 1 other)". That is loose
+-- wording in the document rather than a gap in this list.
 insert into proficiency_defs (kind, name) values
     ('weapon', 'Single Sword'),
     ('weapon', 'Sword & Board'),
