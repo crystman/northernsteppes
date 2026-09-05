@@ -27,6 +27,29 @@ jobs:
   test:
     name: pytest
     runs-on: ubuntu-latest
+
+    # The importer's behaviour lives largely in SQL -- ON CONFLICT upserts and
+    # the xmax trick that tells an insert from an update -- so those tests run
+    # against a real Postgres rather than a fake. Throwaway credentials for a
+    # throwaway container; nothing here is a secret.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ns_bot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ns_bot_test
+
     steps:
       - uses: actions/checkout@v4
 
