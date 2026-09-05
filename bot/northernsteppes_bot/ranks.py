@@ -42,6 +42,7 @@ class MemberSheet:
     waiver: bool = False
     dues: bool = False
     veteran_garb: bool = False
+    units: list[str] = field(default_factory=list)
     weapons: dict[str, int] = field(default_factory=dict)
     professions: dict[str, int] = field(default_factory=dict)
     classes: dict[str, int] = field(default_factory=dict)

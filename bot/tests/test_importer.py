@@ -195,8 +195,15 @@ async def test_only_weapons_present_after_bootstrap(pool):
 
 
 @requires_db
-async def test_units_defaults_to_empty_array(pool):
+async def test_units_are_imported_from_the_legacy_singular_key(pool):
+    """Member files still say Unit = "CoWS"; the column is plural. The value
+    has to survive the rename, not be dropped by it."""
     await bootstrap(pool, MEMBERS_DIR)
     async with pool.acquire() as conn:
-        rows = await conn.fetch("select units from members")
-    assert all(r["units"] == [] for r in rows)
+        rows = {
+            r["slug"]: r["units"]
+            for r in await conn.fetch("select slug, units from members")
+        }
+    assert rows["kaigar"] == ["CoWS"]
+    assert rows["meatwolf"] == ["BoTF"]
+    assert rows["lamp"] == [], "members with no unit should have an empty array"

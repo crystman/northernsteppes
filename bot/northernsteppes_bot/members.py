@@ -63,12 +63,24 @@ def parse_member(path: Path) -> MemberSheet:
 
     classes = dict(extra.get("classes", {}) or {})
 
+    # `Unit` was a single string; `Units` is the plural replacement, since a
+    # member can belong to more than one. Read either so the migration can
+    # happen on write without losing anybody's unit.
+    raw_units = extra.get("Units", extra.get("Unit"))
+    if raw_units is None:
+        units: list[str] = []
+    elif isinstance(raw_units, str):
+        units = [raw_units]
+    else:
+        units = [str(u) for u in raw_units]
+
     return MemberSheet(
         slug=slug_for(path),
         display_name=str(doc.get("title", "") or ""),
         waiver=bool(extra.get("Waiver", False)),
         dues=bool(extra.get("Dues", False)),
         veteran_garb=bool(extra.get("Veteran_Garb", False)),
+        units=units,
         weapons=as_int_map(extra.get("weapons")),
         professions=as_int_map(extra.get("professions")),
         # Classes mix ints (levels, counters) with bools (thief flags), so this
