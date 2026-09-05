@@ -142,6 +142,36 @@ link is set by `/link`, a leadership-gated write command that does not exist
 yet. Matching on a Discord display name instead would risk showing one
 person's sheet to another.
 
+### Where member files come from
+
+The bot reads `content/members/` from disk when the repository is checked out
+beside it, and from GitHub when it is not. A host that builds only `bot/` has
+no `content/` directory, and a bot that could only read the filesystem would
+exit at startup with nothing to serve.
+
+| Variable | Meaning |
+|---|---|
+| `MEMBERS_DIR` | Explicit local path. Used if it exists. |
+| `MEMBERS_REPO` | Repository to fetch from, default `jackhumbert/northernsteppes` |
+| `MEMBERS_REF` | Branch, default `main` |
+
+Local wins when present, so an uncommitted change is visible during
+development rather than being masked by whatever is on the branch. The startup
+log says which was chosen:
+
+```
+member files: github:jackhumbert/northernsteppes@main/content/members
+```
+
+The repository is public, so fetching needs no credentials. One API call lists
+the directory and the bodies come from raw.githubusercontent.com, because
+unauthenticated GitHub allows only 60 API calls an hour -- a refresh that spent
+one per file would exhaust that in three refreshes.
+
+Fetching takes a few seconds, so it runs on a worker thread rather than the
+event loop. Blocking the loop that long stalls Discord's heartbeat and drops
+the connection.
+
 ### Where read commands get their data
 
 From the member files, not the database. Nothing writes to the database yet
@@ -156,11 +186,17 @@ becomes a query and `MemberDirectory` loses its file path.
 Two services in one project: a Postgres, and this bot as a worker with no
 public domain or exposed port.
 
-Because `railway.json` and `requirements.txt` live in `bot/`, the service's
-**Root Directory must be `bot/`** -- that is a service setting rather than
-something config-as-code can express. Everything else is in `railway.json`:
-the start command, the `bot/**` watch patterns that stop a bylaws edit
-redeploying the bot, and an on-failure restart policy.
+Because `requirements.txt` lives in `bot/`, the service's **Root Directory
+must be `bot/`** -- that is a service setting rather than something
+config-as-code can express.
+
+Railway may build with either Nixpacks or Railpack. Both are covered: a
+`Procfile` and a `railpack.json` give the start command, since Railpack does
+not read `railway.json`'s builder hint and fails the build outright if it
+cannot infer one.
+
+Building from `bot/` means `content/members/` is **not** in the image, so the
+bot fetches member files from GitHub instead -- see below.
 
 Variables to set on the bot service:
 

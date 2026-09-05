@@ -17,6 +17,9 @@ from dataclasses import dataclass
 #: Discord guild (server) the bot registers its commands in.
 DEFAULT_GUILD_ID = 183746241098678273
 
+#: Repository member files are read from when they are not on disk.
+DEFAULT_MEMBERS_REPO = "jackhumbert/northernsteppes"
+
 
 def _flag(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -46,6 +49,9 @@ class Config:
     sync_enabled: bool
     dry_run: bool
     sync_debounce_seconds: int
+    members_dir: str | None
+    members_repo: str
+    members_ref: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -62,6 +68,11 @@ class Config:
             sync_enabled=_flag("SYNC_ENABLED", False),
             dry_run=_flag("DRY_RUN", True),
             sync_debounce_seconds=_int_or_none("SYNC_DEBOUNCE_SECONDS") or 300,
+            members_dir=os.environ.get("MEMBERS_DIR", "").strip() or None,
+            members_repo=(
+                os.environ.get("MEMBERS_REPO", "").strip() or DEFAULT_MEMBERS_REPO
+            ),
+            members_ref=os.environ.get("MEMBERS_REF", "").strip() or "main",
         )
 
     @property

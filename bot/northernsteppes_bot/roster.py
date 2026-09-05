@@ -17,8 +17,9 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .members import load_all
+from .members import parse_member_text
 from .ranks import MemberSheet
+from .sources import LocalSource, MemberSource
 
 #: Rebuild the cache at most this often. The files only change when someone
 #: commits, so this is about bounding staleness, not about load.
@@ -39,8 +40,12 @@ class MemberDirectory:
 
     def __init__(self, members_dir: Path | None = None,
                  ttl_seconds: int = DEFAULT_TTL_SECONDS,
-                 auto_reload: bool = True) -> None:
+                 auto_reload: bool = True,
+                 source: MemberSource | None = None) -> None:
         self.members_dir = members_dir or default_members_dir()
+        # A directory is still accepted directly, which keeps every existing
+        # caller and test working unchanged.
+        self.source = source or LocalSource(self.members_dir)
         self.ttl_seconds = ttl_seconds
         # When False, all() never reloads on the calling path. The bot sets
         # this and refreshes on a background task instead: autocomplete fires
@@ -51,8 +56,12 @@ class MemberDirectory:
         self._loaded_at: float | None = None
 
     def load(self) -> list[MemberSheet]:
-        """Force a reload."""
-        self._sheets = load_all(self.members_dir)
+        """Force a reload. Blocking: callers on the event loop use to_thread."""
+        files = self.source.fetch()
+        self._sheets = sorted(
+            (parse_member_text(name, text) for name, text in files.items()),
+            key=lambda s: s.slug,
+        )
         self._loaded_at = time.monotonic()
         return self._sheets
 

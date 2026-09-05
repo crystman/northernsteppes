@@ -18,7 +18,8 @@ from .bot import (
     build_write_tree,
 )
 from .config import Config
-from .roster import MemberDirectory
+from .roster import MemberDirectory, default_members_dir
+from .sources import choose_source
 
 log = logging.getLogger("northernsteppes_bot")
 
@@ -65,22 +66,28 @@ def main() -> int:
         )
         return 1
 
+    # Member files come from disk when the repository is checked out beside
+    # the bot, and from GitHub when it is not -- a host may build only bot/,
+    # leaving content/members out of the image entirely.
+    local = Path(config.members_dir) if config.members_dir else default_members_dir()
+    source = choose_source(local, config.members_repo, config.members_ref)
+    log.info("member files: %s", source.describe())
+
     # The bot refreshes on a background task, so the request path never
     # pays for a reload.
-    directory = MemberDirectory(auto_reload=False)
-    if not directory.members_dir.is_dir():
-        log.error(
-            "member files not found at %s. Set MEMBERS_DIR if the deployment "
-            "layout differs from a repo checkout.",
-            directory.members_dir,
-        )
+    directory = MemberDirectory(auto_reload=False, source=source)
+
+    try:
+        sheets = directory.load()
+    except Exception:
+        log.exception("could not read member files from %s", source.describe())
         return 1
 
-    sheets = directory.load()
     if not sheets:
-        # An empty roster is almost certainly a wrong path rather than a club
-        # with no members, and every command would answer confidently wrong.
-        log.error("no member files found in %s", directory.members_dir)
+        # An empty roster is almost certainly a misconfiguration rather than a
+        # club with no members, and every command would answer confidently
+        # wrong.
+        log.error("no member files found at %s", source.describe())
         return 1
 
     log.info("loaded %d members | %s", len(sheets), config.describe_posture())

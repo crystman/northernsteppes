@@ -90,9 +90,11 @@ class NorthernSteppesBot(discord.Client):
         while True:
             await asyncio.sleep(self.refresh_interval_seconds)
             try:
-                # Blocking file reads, but small and infrequent: 21 files,
-                # roughly 34ms, once every few minutes.
-                self.directory.load()
+                # to_thread because load() blocks. Reading 21 local files is
+                # ~34ms, but fetching them from GitHub is seconds, and holding
+                # the event loop that long stalls Discord's heartbeat and
+                # drops the connection.
+                await asyncio.to_thread(self.directory.load)
             except Exception:
                 # A transient read failure must not kill the refresher and
                 # leave the roster frozen for the process's lifetime.

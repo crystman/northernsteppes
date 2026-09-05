@@ -337,3 +337,30 @@ def test_writes_enable_once_the_name_resolves(write_bot, monkeypatch):
     cfg = Config.from_env()
     resolved = dataclasses.replace(cfg, leadership_role_id=2)
     assert resolved.write_commands_enabled is True
+
+
+def test_refresh_does_not_block_the_event_loop(bot, monkeypatch):
+    """load() can take seconds against GitHub. Holding the event loop that
+    long stalls Discord's heartbeat and drops the connection."""
+    import asyncio, time
+
+    monkeypatch.setattr(bot.directory, "load", lambda: time.sleep(0.3))
+    bot.refresh_interval_seconds = 0.001
+
+    async def run():
+        task = asyncio.create_task(bot._refresh_members())
+        # If load() ran inline, this would not get to run for 300ms.
+        start = time.perf_counter()
+        await asyncio.sleep(0.05)
+        elapsed = time.perf_counter() - start
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return elapsed
+
+    elapsed = asyncio.run(run())
+    assert elapsed < 0.25, (
+        f"event loop was blocked for {elapsed:.2f}s during a refresh"
+    )

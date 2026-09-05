@@ -44,7 +44,16 @@ def slug_for(path: Path) -> str:
 
 def parse_member(path: Path) -> MemberSheet:
     """Load one member file into a :class:`MemberSheet`."""
-    doc, _body = split_frontmatter(path.read_text(encoding="utf-8"))
+    return parse_member_text(path.name, path.read_text(encoding="utf-8"))
+
+
+def parse_member_text(filename: str, text: str) -> MemberSheet:
+    """Parse a member sheet from its file name and contents.
+
+    Split from parse_member so files fetched over the network, which have no
+    path, go through exactly the same parser as files on disk.
+    """
+    doc, _body = split_frontmatter(text)
     extra = doc.get("extra", {}) or {}
 
     dues_years: dict[int, bool] = {}
@@ -55,7 +64,7 @@ def parse_member(path: Path) -> MemberSheet:
             # A non-year key under [extra.dues] is a data error worth
             # surfacing rather than silently dropping.
             raise MemberFileError(
-                f"{path.name}: [extra.dues] key {key!r} is not a year"
+                f"{filename}: [extra.dues] key {key!r} is not a year"
             ) from None
 
     def as_int_map(table) -> dict[str, int]:
@@ -75,7 +84,7 @@ def parse_member(path: Path) -> MemberSheet:
         units = [str(u) for u in raw_units]
 
     return MemberSheet(
-        slug=slug_for(path),
+        slug=filename.removesuffix(".md").lstrip("_"),
         display_name=str(doc.get("title", "") or ""),
         waiver=bool(extra.get("Waiver", False)),
         dues=bool(extra.get("Dues", False)),
