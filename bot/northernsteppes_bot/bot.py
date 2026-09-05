@@ -51,7 +51,6 @@ class NorthernSteppesBot(discord.Client):
 
     async def setup_hook(self) -> None:
         await self._connect_store()
-        await self._start_api()
 
         # Reload off the request path. Autocomplete fires on every keystroke,
         # and a cache reload landing on one stalls it while 21 files are
@@ -96,10 +95,15 @@ class NorthernSteppesBot(discord.Client):
                 "will refuse"
             )
 
-    async def _start_api(self) -> None:
+    async def start_api(self) -> None:
         """Serve the read API, if a port is configured.
 
-        Failing to bind must not stop the bot: Discord commands are the
+        Started before connecting to Discord, and deliberately not from
+        setup_hook: setup_hook only runs after a successful login, so a
+        Discord outage or rate limit would otherwise take the website's live
+        data down with it. The API needs nothing from Discord.
+
+        Failing to bind must not stop the bot either -- commands are the
         primary function, and the API only makes the website fresher.
         """
         if not self.config.api_port:

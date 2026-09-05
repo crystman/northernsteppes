@@ -418,3 +418,90 @@ def test_guild_check_precedes_the_role_check(write_bot, monkeypatch):
     other = GuildInteraction(999999999, FakeUser(None))
     msg = asyncio.run(bot._require_leadership(other))
     assert "different server" in msg
+
+
+# --- surviving a Discord outage or rate limit ------------------------------
+
+def test_api_starts_before_connecting_to_discord(write_bot, monkeypatch):
+    """The API needs nothing from Discord, so a bad token, an outage or a rate
+    limit must not take the website's live member data down with it."""
+    import asyncio
+    import northernsteppes_bot.__main__ as entry
+
+    order = []
+
+    async def fake_start_api():
+        order.append("api")
+
+    async def fake_start(token):
+        order.append("discord")
+        raise discord.LoginFailure("nope")
+
+    async def fake_close():
+        order.append("close")
+
+    monkeypatch.setattr(write_bot, "start_api", fake_start_api)
+    monkeypatch.setattr(write_bot, "start", fake_start)
+    monkeypatch.setattr(write_bot, "close", fake_close)
+    monkeypatch.setenv("DISCORD_TOKEN", "a.b.c")
+
+    code = asyncio.run(entry.run(write_bot, Config.from_env()))
+    assert code == 1
+    assert order[0] == "api", "the API must be up before Discord is attempted"
+
+
+def test_a_rate_limit_backs_off_before_exiting(write_bot, monkeypatch):
+    """Exiting immediately has the host restart straight into another login
+    attempt, which is what earns the block."""
+    import asyncio
+    import northernsteppes_bot.__main__ as entry
+
+    slept = []
+
+    async def fake_start_api():
+        pass
+
+    async def fake_start(token):
+        raise discord.HTTPException(
+            type("R", (), {"status": 429, "reason": "Too Many Requests"})(),
+            "rate limited",
+        )
+
+    async def fake_close():
+        pass
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    monkeypatch.setattr(write_bot, "start_api", fake_start_api)
+    monkeypatch.setattr(write_bot, "start", fake_start)
+    monkeypatch.setattr(write_bot, "close", fake_close)
+    monkeypatch.setattr(entry.asyncio, "sleep", fake_sleep)
+    monkeypatch.setenv("DISCORD_TOKEN", "a.b.c")
+
+    code = asyncio.run(entry.run(write_bot, Config.from_env()))
+    assert code == 1
+    assert slept == [entry.RATE_LIMIT_BACKOFF_SECONDS]
+
+
+def test_other_http_errors_are_not_swallowed(write_bot, monkeypatch):
+    """Only a 429 gets the backoff; anything else should surface."""
+    import asyncio
+    import northernsteppes_bot.__main__ as entry
+
+    async def noop(*a, **k):
+        pass
+
+    async def fake_start(token):
+        raise discord.HTTPException(
+            type("R", (), {"status": 500, "reason": "Server Error"})(),
+            "boom",
+        )
+
+    monkeypatch.setattr(write_bot, "start_api", noop)
+    monkeypatch.setattr(write_bot, "start", fake_start)
+    monkeypatch.setattr(write_bot, "close", noop)
+    monkeypatch.setenv("DISCORD_TOKEN", "a.b.c")
+
+    with pytest.raises(discord.HTTPException):
+        asyncio.run(entry.run(write_bot, Config.from_env()))

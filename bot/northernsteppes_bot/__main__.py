@@ -7,6 +7,7 @@ while doing nothing useful.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -121,16 +122,51 @@ def main() -> int:
     build_tree(bot)
     build_write_tree(bot)
     build_admin_tree(bot)
+    return asyncio.run(run(bot, config))
+
+
+#: How long to hold the process open after Discord rate-limits the login.
+#: Each restart is another login attempt, and enough of them in quick
+#: succession earn a Cloudflare block on the whole address -- so the backoff
+#: has to outlast the restart, not just the request.
+RATE_LIMIT_BACKOFF_SECONDS = 300
+
+
+async def run(bot: NorthernSteppesBot, config: Config) -> int:
+    """Serve the API, then connect to Discord.
+
+    In that order deliberately. The API needs nothing from Discord, so a
+    Discord outage, a bad token or a rate limit should not take the website's
+    live member data down with it.
+    """
+    await bot.start_api()
     try:
-        bot.run(config.discord_token, log_handler=None)
+        await bot.start(config.discord_token)
     except discord.LoginFailure:
-        # Exit cleanly instead of letting the traceback repeat on every
-        # restart. Nothing about a rejected token is retryable.
+        # Nothing about a rejected token is retryable, and repeating the
+        # traceback on every restart adds nothing.
         log.error(
             "Discord rejected the token. Reset it on the developer portal's "
             "Bot tab and update DISCORD_TOKEN."
         )
         return 1
+    except discord.HTTPException as exc:
+        if exc.status != 429:
+            raise
+        # Exiting immediately would have the host restart us straight into
+        # another login attempt, which is what earns the block in the first
+        # place. Wait it out with the API still serving.
+        log.error(
+            "Discord is rate limiting logins (429). This is usually the "
+            "result of repeated restarts. Holding for %d seconds before "
+            "exiting so a restart does not immediately retry; the read API "
+            "keeps serving meanwhile.",
+            RATE_LIMIT_BACKOFF_SECONDS,
+        )
+        await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+        return 1
+    finally:
+        await bot.close()
     return 0
 
 
