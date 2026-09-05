@@ -419,3 +419,55 @@ async def test_bootstrap_from_sheets_is_idempotent(store):
     again = await bootstrap_sheets(store.pool, sheets)
     assert again.members_inserted == 0
     assert again.members_updated == len(sheets)
+
+
+# --- what the read commands see after a write ------------------------------
+
+@requires_db
+async def test_roster_shows_a_member_immediately_after_recording_dues(store):
+    """The bug a live test found: /dues succeeded, then /roster still showed
+    nobody current, because the read commands were using the file cache and
+    ignoring the database entirely."""
+    from northernsteppes_bot import views
+
+    await store.record_dues("lamp", 2026, ACTOR)
+    overlaid = await store.overlay(load_all(MEMBERS_DIR))
+
+    roster = views.format_roster(overlaid, 2026)
+    current = roster.split("Last year's members")[0]
+    assert "Lamp" in current, "recorded dues should move Lamp to current"
+    assert "**Current members (2026)** — 1" in roster
+    assert "**Harbinger** — Lamp" in roster
+
+
+@requires_db
+async def test_rank_reflects_recorded_dues_immediately(store):
+    from northernsteppes_bot import views
+
+    before = {s.slug: s for s in await store.overlay(load_all(MEMBERS_DIR))}
+    assert "Dues not up to date" in views.format_rank(before["lamp"])
+
+    await store.record_dues("lamp", 2026, ACTOR)
+
+    after = {s.slug: s for s in await store.overlay(load_all(MEMBERS_DIR))}
+    assert "Dues paid for 2026" in views.format_rank(after["lamp"])
+
+
+@requires_db
+async def test_an_award_is_visible_immediately(store):
+    from northernsteppes_bot import views
+
+    await store.set_proficiency("lamp", "weapon", "Archery", 3, ACTOR)
+    after = {s.slug: s for s in await store.overlay(load_all(MEMBERS_DIR))}
+    assert "Archery — Master" in views.format_sheet(after["lamp"])
+
+
+@requires_db
+async def test_reads_without_a_database_still_work(store):
+    """The overlay is an improvement on the files, not a replacement: with no
+    database the commands must still answer."""
+    from northernsteppes_bot import views
+
+    sheets = load_all(MEMBERS_DIR)
+    roster = views.format_roster(sheets, 2026)
+    assert "Nobody has 2026 dues recorded yet" in roster

@@ -291,15 +291,6 @@ def build_tree(bot: NorthernSteppesBot) -> None:
     bot._resolve = resolve_async
     bot._require_leadership = _require_leadership
 
-    def resolve(query: str):
-        """Return (sheet, error_message). Never guesses between matches."""
-        matches = directory.search(query)
-        if not matches:
-            return None, views.format_no_match(query)
-        if len(matches) > 1:
-            return None, views.format_ambiguous(query, matches)
-        return matches[0], None
-
     @tree.command(name="rank", description="Show a member's rank and why")
     @app_commands.describe(member="Member name (leave blank for yourself)")
     @app_commands.autocomplete(member=member_autocomplete)
@@ -313,7 +304,7 @@ def build_tree(bot: NorthernSteppesBot) -> None:
             return await interaction.response.send_message(
                 views.format_rank(sheet)
             )
-        sheet, error = resolve(member)
+        sheet, error = await resolve_async(member)
         if error:
             return await interaction.response.send_message(error, ephemeral=True)
         await interaction.response.send_message(views.format_rank(sheet))
@@ -322,7 +313,7 @@ def build_tree(bot: NorthernSteppesBot) -> None:
     @app_commands.describe(member="Member name")
     @app_commands.autocomplete(member=member_autocomplete)
     async def gaps_cmd(interaction: discord.Interaction, member: str):
-        sheet, error = resolve(member)
+        sheet, error = await resolve_async(member)
         if error:
             return await interaction.response.send_message(error, ephemeral=True)
         await interaction.response.send_message(views.format_gaps(sheet))
@@ -330,7 +321,7 @@ def build_tree(bot: NorthernSteppesBot) -> None:
     @tree.command(name="roster", description="Current members, grouped by rank")
     async def roster_cmd(interaction: discord.Interaction):
         await interaction.response.send_message(
-            views.format_roster(directory.all(), current_year())
+            views.format_roster(await sheets(), current_year())
         )
 
     @tree.command(name="me", description="Show your own proficiency sheet")
@@ -404,7 +395,6 @@ def build_write_tree(bot: "NorthernSteppesBot") -> None:
                 ),
                 ephemeral=True,
             )
-        bot.directory.load()
         await interaction.response.send_message(
             views.format_dues_recorded(
                 sheet.display_name or sheet.slug, year, already=not recorded
@@ -431,7 +421,6 @@ def build_write_tree(bot: "NorthernSteppesBot") -> None:
             return await interaction.response.send_message(
                 views.format_unknown_proficiency(style, known), ephemeral=True
             )
-        bot.directory.load()
         await interaction.response.send_message(
             views.format_award(
                 sheet.display_name or sheet.slug, style, previous, level
