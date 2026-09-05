@@ -242,3 +242,27 @@ def test_all_three_together_allow_writing(monkeypatch):
 
 def test_sync_branch_defaults_to_main(monkeypatch):
     assert _sync_env(monkeypatch).sync_branch == "main"
+
+
+# --- API origins -----------------------------------------------------------
+
+def test_origins_default_to_the_site_and_local_serve(monkeypatch):
+    from northernsteppes_bot.config import DEFAULT_API_ORIGINS
+    monkeypatch.delenv("API_ALLOWED_ORIGINS", raising=False)
+    assert Config.from_env().api_allowed_origins == DEFAULT_API_ORIGINS
+
+
+def test_origins_can_be_configured(monkeypatch):
+    monkeypatch.setenv(
+        "API_ALLOWED_ORIGINS",
+        "https://crystman.github.io, https://northernsteppes.com",
+    )
+    assert Config.from_env().api_allowed_origins == (
+        "https://crystman.github.io", "https://northernsteppes.com",
+    )
+
+
+def test_blank_origins_fall_back_to_the_defaults(monkeypatch):
+    from northernsteppes_bot.config import DEFAULT_API_ORIGINS
+    monkeypatch.setenv("API_ALLOWED_ORIGINS", "   ")
+    assert Config.from_env().api_allowed_origins == DEFAULT_API_ORIGINS

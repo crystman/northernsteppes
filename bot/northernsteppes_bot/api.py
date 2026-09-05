@@ -43,14 +43,10 @@ log = logging.getLogger(__name__)
 
 #: Browsers refuse a cross-origin fetch without this, and the site is served
 #: from a different origin than the API. Read-only and public, so the value is
-#: not a control -- it is set explicitly rather than left to a wildcard so the
-#: intent is visible.
-ALLOWED_ORIGINS = (
-    "https://northernsteppes.com",
-    "https://www.northernsteppes.com",
-    "http://127.0.0.1:1111",   # zola serve
-    "http://localhost:1111",
-)
+#: not a control -- it is listed explicitly rather than left to a wildcard so
+#: the intent is visible. Overridden by API_ALLOWED_ORIGINS, which a fork
+#: deployed to its own Pages URL needs.
+from .config import DEFAULT_API_ORIGINS as ALLOWED_ORIGINS
 
 #: A stale page is better than a hammered API; the data changes rarely.
 CACHE_SECONDS = 60
@@ -84,16 +80,19 @@ def member_json(sheet: MemberSheet, year: int) -> dict:
     }
 
 
-def _cors(request: web.Request, response: web.Response) -> web.Response:
+def _cors(request: web.Request, response: web.Response,
+          allowed: tuple[str, ...] = ALLOWED_ORIGINS) -> web.Response:
     origin = request.headers.get("Origin")
-    if origin in ALLOWED_ORIGINS:
+    if origin in allowed:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
     response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
     return response
 
 
-def build_app(sheets_provider, year_provider) -> web.Application:
+def build_app(sheets_provider, year_provider,
+              allowed_origins: tuple[str, ...] = ALLOWED_ORIGINS
+              ) -> web.Application:
     """An app serving whatever `sheets_provider()` currently returns.
 
     Both are callables rather than values so the API always reflects the
@@ -102,7 +101,7 @@ def build_app(sheets_provider, year_provider) -> web.Application:
     """
 
     async def health(request: web.Request) -> web.Response:
-        return _cors(request, web.json_response({"status": "ok"}))
+        return _cors(request, web.json_response({"status": "ok"}), allowed_origins)
 
     async def members(request: web.Request) -> web.Response:
         year = year_provider()
@@ -110,7 +109,7 @@ def build_app(sheets_provider, year_provider) -> web.Application:
         return _cors(request, web.json_response({
             "year": year,
             "members": [member_json(s, year) for s in sheets],
-        }))
+        }), allowed_origins)
 
     async def member(request: web.Request) -> web.Response:
         slug = request.match_info["slug"].lower()
@@ -120,13 +119,15 @@ def build_app(sheets_provider, year_provider) -> web.Application:
         if found is None:
             return _cors(request, web.json_response(
                 {"error": "no such member", "slug": slug}, status=404
-            ))
-        return _cors(request, web.json_response(member_json(found, year)))
+            ), allowed_origins)
+        return _cors(
+            request, web.json_response(member_json(found, year)), allowed_origins
+        )
 
     async def preflight(request: web.Request) -> web.Response:
         response = web.Response(status=204)
         response.headers["Access-Control-Allow-Methods"] = "GET"
-        return _cors(request, response)
+        return _cors(request, response, allowed_origins)
 
     app = web.Application()
     app.add_routes([

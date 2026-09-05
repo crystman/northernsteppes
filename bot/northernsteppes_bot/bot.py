@@ -114,7 +114,11 @@ class NorthernSteppesBot(discord.Client):
                 return await self.store.overlay(base)
 
             self._api_runner = await start(
-                build_app(sheets_provider, current_year), self.config.api_port
+                build_app(
+                    sheets_provider, current_year,
+                    self.config.api_allowed_origins,
+                ),
+                self.config.api_port,
             )
         except Exception:
             log.exception("read API failed to start; continuing without it")

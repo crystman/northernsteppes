@@ -177,3 +177,34 @@ async def test_the_api_reflects_current_state_not_a_snapshot(sheets):
 
         after = await (await client.get("/api/members/lamp")).json()
         assert after["dues"]["state"] == "paid"
+
+
+# --- configurable origins --------------------------------------------------
+
+async def test_a_configured_origin_is_allowed(sheets):
+    """A fork deployed to its own Pages URL needs its origin added, and that
+    should not require a code change."""
+    async def provider():
+        return sheets
+
+    app = build_app(provider, lambda: 2026,
+                    ("https://crystman.github.io",))
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get(
+            "/api/members", headers={"Origin": "https://crystman.github.io"}
+        )
+        assert response.headers["Access-Control-Allow-Origin"] == (
+            "https://crystman.github.io"
+        )
+
+
+async def test_configuring_origins_replaces_the_defaults(sheets):
+    async def provider():
+        return sheets
+
+    app = build_app(provider, lambda: 2026, ("https://only-this.example",))
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get(
+            "/api/members", headers={"Origin": "https://northernsteppes.com"}
+        )
+        assert "Access-Control-Allow-Origin" not in response.headers

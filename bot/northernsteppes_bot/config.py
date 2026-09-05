@@ -28,6 +28,22 @@ def _flag(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+#: Origins allowed to read the API when API_ALLOWED_ORIGINS is unset.
+DEFAULT_API_ORIGINS = (
+    "https://northernsteppes.com",
+    "https://www.northernsteppes.com",
+    "http://127.0.0.1:1111",   # zola serve
+    "http://localhost:1111",
+)
+
+
+def _origins(name: str) -> tuple[str, ...]:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return DEFAULT_API_ORIGINS
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 def _int_or_none(name: str) -> int | None:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -65,6 +81,7 @@ class Config:
     sync_repo: str | None
     sync_branch: str
     api_port: int | None
+    api_allowed_origins: tuple[str, ...]
     members_dir: str | None
     members_repo: str
     members_ref: str
@@ -91,6 +108,9 @@ class Config:
             # Railway sets PORT for a service with a public domain. Without
             # one the bot stays a private worker and serves nothing.
             api_port=_int_or_none("PORT"),
+            # Comma-separated. A fork deployed to its own Pages URL needs its
+            # origin added, which should not require a code change.
+            api_allowed_origins=_origins("API_ALLOWED_ORIGINS"),
             members_dir=os.environ.get("MEMBERS_DIR", "").strip() or None,
             members_repo=(
                 os.environ.get("MEMBERS_REPO", "").strip() or DEFAULT_MEMBERS_REPO
