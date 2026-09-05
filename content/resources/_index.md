@@ -1,5 +1,6 @@
 +++
 title = "Resources"
+sort_by = "title"
 
 [extra]
 header = true
