@@ -148,3 +148,44 @@ def test_posture_names_the_missing_piece(monkeypatch):
     assert "no leadership role" in Config.from_env().describe_posture()
     monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
     assert "no database" in Config.from_env().describe_posture()
+
+
+# --- token shape -----------------------------------------------------------
+
+def test_a_bot_token_has_three_parts():
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("MTU0NTYy.Gx3f2K.abc123") is True
+
+
+def test_a_client_secret_is_rejected():
+    """The likely mistake: it sits one tab away in the developer portal and
+    Discord only answers with a bare 401 at login."""
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6") is False
+
+
+def test_an_empty_segment_is_rejected():
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("MTU0NTYy..abc123") is False
+
+
+def test_too_many_parts_is_rejected():
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("a.b.c.d") is False
+
+
+# --- the defaulted guild ---------------------------------------------------
+
+def test_an_unset_guild_is_flagged_as_defaulted(monkeypatch):
+    """The fallback is the real Northern Steppes guild, so a deployment that
+    forgot to set it would register commands in production."""
+    monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
+    cfg = Config.from_env()
+    assert cfg.guild_id == DEFAULT_GUILD_ID
+    assert cfg.guild_is_defaulted is True
+
+
+def test_an_explicit_guild_is_not_flagged(monkeypatch):
+    monkeypatch.setenv("DISCORD_GUILD_ID", "1279582837749842092")
+    cfg = Config.from_env()
+    assert cfg.guild_is_defaulted is False

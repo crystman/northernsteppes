@@ -11,13 +11,15 @@ import logging
 import sys
 from pathlib import Path
 
+import discord
+
 from .bot import (
     NorthernSteppesBot,
     build_admin_tree,
     build_tree,
     build_write_tree,
 )
-from .config import Config
+from .config import Config, looks_like_a_bot_token
 from .roster import MemberDirectory, default_members_dir
 from .sources import choose_source
 
@@ -59,6 +61,17 @@ def main() -> int:
         log.info("loaded settings from %s", ENV_FILE)
 
     config = Config.from_env()
+
+    # The fallback guild is the real Northern Steppes server. A deployment
+    # that forgot to set DISCORD_GUILD_ID would otherwise quietly register
+    # its commands in production.
+    if config.guild_is_defaulted:
+        log.warning(
+            "DISCORD_GUILD_ID is not set; defaulting to the Northern Steppes "
+            "guild %s. Set it explicitly for a test deployment.",
+            config.guild_id,
+        )
+
     if not config.discord_token:
         log.error(
             "DISCORD_TOKEN is not set; nothing to connect with. Set it in the "
@@ -92,11 +105,32 @@ def main() -> int:
 
     log.info("loaded %d members | %s", len(sheets), config.describe_posture())
 
+    if not looks_like_a_bot_token(config.discord_token):
+        # Fail here rather than at login: Discord answers a malformed token
+        # with a bare 401, which under a restart policy becomes a loop of
+        # stack traces that says nothing about the cause.
+        log.error(
+            "DISCORD_TOKEN does not look like a bot token. A bot token has "
+            "three dot-separated parts and comes from the developer portal's "
+            "Bot tab; the OAuth2 Client Secret is a single string and will "
+            "not work."
+        )
+        return 1
+
     bot = NorthernSteppesBot(config, directory)
     build_tree(bot)
     build_write_tree(bot)
     build_admin_tree(bot)
-    bot.run(config.discord_token, log_handler=None)
+    try:
+        bot.run(config.discord_token, log_handler=None)
+    except discord.LoginFailure:
+        # Exit cleanly instead of letting the traceback repeat on every
+        # restart. Nothing about a rejected token is retryable.
+        log.error(
+            "Discord rejected the token. Reset it on the developer portal's "
+            "Bot tab and update DISCORD_TOKEN."
+        )
+        return 1
     return 0
 
 

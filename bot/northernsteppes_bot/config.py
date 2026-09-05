@@ -39,6 +39,17 @@ def _int_or_none(name: str) -> int | None:
         return None
 
 
+def looks_like_a_bot_token(token: str) -> bool:
+    """Cheap shape check for a Discord bot token.
+
+    A bot token is three dot-separated parts; an OAuth2 client secret is a
+    single opaque string. Confusing the two is easy -- they sit one tab apart
+    in the developer portal -- and the only feedback Discord gives is a 401
+    at login, which reads as a crash rather than a configuration mistake.
+    """
+    return token.count(".") == 2 and all(part for part in token.split("."))
+
+
 @dataclass(frozen=True)
 class Config:
     discord_token: str | None
@@ -49,6 +60,7 @@ class Config:
     sync_enabled: bool
     dry_run: bool
     sync_debounce_seconds: int
+    _guild_was_defaulted: bool
     members_dir: str | None
     members_repo: str
     members_ref: str
@@ -58,6 +70,7 @@ class Config:
         return cls(
             discord_token=os.environ.get("DISCORD_TOKEN") or None,
             guild_id=_int_or_none("DISCORD_GUILD_ID") or DEFAULT_GUILD_ID,
+            _guild_was_defaulted=_int_or_none("DISCORD_GUILD_ID") is None,
             leadership_role_id=_int_or_none("LEADERSHIP_ROLE_ID"),
             leadership_role_name=(
                 os.environ.get("LEADERSHIP_ROLE_NAME", "").strip() or None
@@ -74,6 +87,16 @@ class Config:
             ),
             members_ref=os.environ.get("MEMBERS_REF", "").strip() or "main",
         )
+
+    @property
+    def guild_is_defaulted(self) -> bool:
+        """True when DISCORD_GUILD_ID was not set.
+
+        Worth surfacing: the fallback is the real Northern Steppes guild, so
+        an unconfigured test deployment would otherwise quietly point at
+        production.
+        """
+        return self._guild_was_defaulted
 
     @property
     def write_commands_enabled(self) -> bool:
