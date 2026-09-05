@@ -64,11 +64,17 @@ class Config:
     def write_commands_enabled(self) -> bool:
         """Whether commands that modify member records may run at all.
 
-        False while LEADERSHIP_ROLE_ID is unset. Without it there is no way to
-        tell leadership from anyone else, and the safe reading of "no role
-        configured" is "nobody is leadership", not "everybody is".
+        Requires both a leadership role and a database.
+
+        Without the role there is no way to tell leadership from anyone else,
+        and the safe reading of "no role configured" is "nobody is
+        leadership", not "everybody is".
+
+        Without a database there is nowhere for a write to go. Accepting the
+        command and discarding it would be worse than refusing: leadership
+        would believe dues were recorded when nothing was.
         """
-        return self.leadership_role_id is not None
+        return self.leadership_role_id is not None and self.database_url is not None
 
     @property
     def may_write_to_git(self) -> bool:
@@ -78,10 +84,15 @@ class Config:
     def describe_posture(self) -> str:
         """One-line summary for the startup log, so the running mode is
         obvious in Railway's logs rather than inferred."""
+        if self.write_commands_enabled:
+            writes = "enabled"
+        elif self.leadership_role_id is None:
+            writes = "DISABLED (no leadership role)"
+        else:
+            writes = "DISABLED (no database)"
         bits = [
             f"guild={self.guild_id}",
-            "write-commands="
-            + ("enabled" if self.write_commands_enabled else "DISABLED (no role)"),
+            "write-commands=" + writes,
             "git-sync="
             + (
                 "live"

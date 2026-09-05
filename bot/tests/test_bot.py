@@ -183,3 +183,92 @@ def test_refresh_survives_a_read_failure(bot, monkeypatch):
 
 def test_refresh_interval_is_half_the_ttl(bot):
     assert bot.refresh_interval_seconds <= bot.directory.ttl_seconds
+
+
+# --- write commands and the permission gate --------------------------------
+
+class FakeRole:
+    def __init__(self, rid): self.id = rid
+
+
+class FakeUser:
+    def __init__(self, rid=None, uid=1):
+        self.roles = [FakeRole(rid)] if rid is not None else []
+        self.id = uid
+
+
+class FakeInteraction:
+    def __init__(self, user): self.user = user
+
+
+@pytest.fixture
+def write_bot(monkeypatch):
+    """A bot with the write commands registered but nothing configured."""
+    for name in ("DISCORD_TOKEN", "LEADERSHIP_ROLE_ID", "DATABASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    from northernsteppes_bot.bot import build_write_tree
+    directory = MemberDirectory(MEMBERS_DIR)
+    directory.load()
+    client = NorthernSteppesBot(Config.from_env(), directory)
+    build_tree(client)
+    build_write_tree(client)
+    return client
+
+
+WRITE_COMMANDS = {"dues", "award", "waiver", "veteran-garb", "link"}
+
+
+def test_write_commands_are_registered(write_bot):
+    assert WRITE_COMMANDS <= {c.name for c in write_bot.tree.get_commands()}
+
+
+def test_write_commands_are_visible_even_when_disabled(write_bot):
+    """Registered so they explain themselves, rather than being mysteriously
+    absent while the role is being created."""
+    assert write_bot.config.write_commands_enabled is False
+    assert WRITE_COMMANDS <= {c.name for c in write_bot.tree.get_commands()}
+
+
+def test_gate_refuses_when_no_role_is_configured(write_bot):
+    import asyncio
+    msg = asyncio.run(write_bot._require_leadership(FakeInteraction(FakeUser(1))))
+    assert msg is not None and "no leadership role" in msg
+
+
+def test_gate_refuses_when_no_database(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    write_bot.config = Config.from_env()
+    import asyncio
+    msg = asyncio.run(write_bot._require_leadership(FakeInteraction(FakeUser(555))))
+    assert msg is not None and "no database" in msg
+
+
+def test_gate_refuses_a_member_without_the_role(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    write_bot.config = Config.from_env()
+    write_bot.store = object()   # configured, so the gate reaches the role check
+    import asyncio
+    msg = asyncio.run(write_bot._require_leadership(FakeInteraction(FakeUser(1))))
+    assert msg is not None and "Only leadership" in msg
+
+
+def test_gate_allows_a_member_with_the_role(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    write_bot.config = Config.from_env()
+    write_bot.store = object()
+    import asyncio
+    assert asyncio.run(
+        write_bot._require_leadership(FakeInteraction(FakeUser(555)))
+    ) is None
+
+
+def test_gate_refuses_a_user_with_no_roles_at_all(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    write_bot.config = Config.from_env()
+    write_bot.store = object()
+    import asyncio
+    msg = asyncio.run(write_bot._require_leadership(FakeInteraction(FakeUser(None))))
+    assert msg is not None

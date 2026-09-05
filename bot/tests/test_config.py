@@ -36,8 +36,9 @@ def test_sync_defaults_off_and_dry_run_defaults_on():
     assert cfg.dry_run is True
 
 
-def test_role_id_enables_write_commands(monkeypatch):
+def test_role_id_and_database_enable_write_commands(monkeypatch):
     monkeypatch.setenv("LEADERSHIP_ROLE_ID", "12345")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
     assert Config.from_env().write_commands_enabled is True
 
 
@@ -104,6 +105,7 @@ def test_is_leadership_false_for_unrelated_roles(monkeypatch):
 
 def test_is_leadership_true_with_the_role(monkeypatch):
     monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
     assert is_leadership(Config.from_env(), [111, 555]) is True
 
 
@@ -111,9 +113,38 @@ def test_is_leadership_accepts_string_role_ids(monkeypatch):
     """Discord IDs are frequently strings; a type mismatch must not silently
     fail open or closed by accident."""
     monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
     assert is_leadership(Config.from_env(), ["555"]) is True
 
 
 def test_is_leadership_false_for_empty_roles(monkeypatch):
     monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
     assert is_leadership(Config.from_env(), []) is False
+
+
+# --- writes need somewhere to go, too --------------------------------------
+
+def test_role_without_a_database_still_disables_writes(monkeypatch):
+    """Accepting a /dues command with no database would discard it silently,
+    leaving leadership believing dues were recorded."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    cfg = Config.from_env()
+    assert cfg.database_url is None
+    assert cfg.write_commands_enabled is False
+
+
+def test_database_without_a_role_disables_writes(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert Config.from_env().write_commands_enabled is False
+
+
+def test_both_together_enable_writes(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert Config.from_env().write_commands_enabled is True
+
+
+def test_posture_names_the_missing_piece(monkeypatch):
+    assert "no leadership role" in Config.from_env().describe_posture()
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    assert "no database" in Config.from_env().describe_posture()

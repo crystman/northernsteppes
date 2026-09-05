@@ -197,3 +197,64 @@ def format_unlinked(year: int) -> str:
         "know whose sheet to show. Ask leadership to link you, or use "
         "`/rank <name>`."
     )
+
+
+# --- write command responses ----------------------------------------------
+
+def format_writes_disabled(config) -> str:
+    """Why a write command refused. Says which piece is missing, because
+    "you can't do that" with no reason is the most annoying possible reply."""
+    if config.leadership_role_id is None:
+        return (
+            "⚙️ Write commands are switched off: no leadership role is "
+            "configured yet, so I can't tell who is allowed to use them."
+        )
+    return (
+        "⚙️ Write commands are switched off: no database is configured, so "
+        "there is nowhere to record this."
+    )
+
+
+def format_not_leadership() -> str:
+    return "🔒 Only leadership can use that command."
+
+
+def format_dues_recorded(name: str, year: int, already: bool) -> str:
+    if already:
+        return f"ℹ️ {name} already had {year} dues recorded — nothing changed."
+    return f"✅ Recorded {year} dues for **{name}**."
+
+
+def format_award(name: str, style: str, previous, level: int) -> str:
+    """Report an award, including when it is a downgrade or a no-op.
+
+    Saying "set to Adept" when it was already Adept invites the awarder to
+    wonder whether it took.
+    """
+    new = LEVEL_NAMES[level]
+    if previous is None or previous == 0:
+        return f"✅ **{name}** is now {new} in {style}."
+    if previous == level:
+        return f"ℹ️ **{name}** was already {new} in {style} — nothing changed."
+    old = LEVEL_NAMES[previous]
+    arrow = "↑" if level > previous else "↓"
+    return f"✅ **{name}**: {style} {old} {arrow} {new}."
+
+
+def format_flag_set(name: str, label: str, value: bool) -> str:
+    return f"✅ **{name}** — {label} set to {'yes' if value else 'no'}."
+
+
+def format_linked(name: str, mention: str, taken_from: str | None) -> str:
+    if taken_from:
+        return (
+            f"✅ Linked {mention} to **{name}**.\n"
+            f"⚠️ That account was previously linked to `{taken_from}`, which "
+            "is now unlinked."
+        )
+    return f"✅ Linked {mention} to **{name}**."
+
+
+def format_unknown_proficiency(name: str, known: list[str]) -> str:
+    listing = ", ".join(f"`{k}`" for k in known)
+    return f"❌ **{name}** is not a known weapon style. Known: {listing}"
