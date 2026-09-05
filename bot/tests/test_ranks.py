@@ -122,18 +122,28 @@ def test_veteran_garb_without_dues_is_still_peasant():
     assert rank_name(m) == "Peasant"
 
 
-def test_professions_route_cannot_reach_harbinger():
-    """Documents a known divergence from the written rules.
+def test_professions_route_reaches_harbinger():
+    """The non-combat route: dues, a second-rank profession and veteran garb,
+    with no combat styles at all."""
+    m = sheet(waiver=True, dues=True, veteran_garb=True, professions={"Cook": 2})
+    assert rank_name(m) == "Harbinger"
 
-    content/proficiencies/index.md describes Harbinger as reachable by
-    reaching second rank in a non-combat class. The site's implementation
-    gates the veteran-garb check behind the combat route, so this member --
-    adept profession and veteran garb, but no combat styles -- stops at
-    Savage. This test pins the *implemented* behaviour; see the note in
-    ranks.rank().
-    """
-    m = sheet(waiver=True, dues=True, veteran_garb=True, professions={"Cook": 3})
+
+def test_professions_route_needs_second_rank_for_harbinger():
+    """One proficient profession is Savage; it takes a second rank to advance."""
+    m = sheet(waiver=True, dues=True, veteran_garb=True, professions={"Cook": 1})
     assert rank_name(m) == "Savage"
+
+
+def test_professions_route_needs_garb_for_harbinger():
+    m = sheet(waiver=True, dues=True, veteran_garb=False, professions={"Cook": 3})
+    assert rank_name(m) == "Savage"
+
+
+def test_professions_route_needs_dues():
+    """Both non-combat ranks sit behind dues being paid."""
+    m = sheet(waiver=True, dues=False, veteran_garb=True, professions={"Cook": 3})
+    assert rank_name(m) == "Peasant"
 
 
 # --- class ladders ---------------------------------------------------------

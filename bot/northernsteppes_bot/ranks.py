@@ -91,21 +91,17 @@ def rank(sheet: MemberSheet) -> int:
                     if value == 0:
                         result = 2
     else:
-        # Savage via a single proficient profession.
-        #
-        # NOTE: this branch caps at Savage. Because the veteran-garb check
-        # lives inside the combat branch above, a member who reaches Savage
-        # through professions cannot reach Harbinger at all.
-        #
-        # content/proficiencies/index.md describes Harbinger as "Proficient in
-        # all combat styles OR reach second rank in a Non-Combat class", which
-        # does not require the combat route first. The written rules and the
-        # site's implementation disagree here. This port preserves the
-        # implemented behaviour so the site's output does not change; resolving
-        # it is a decision for leadership, not a code change.
+        # Savage via a single proficient non-combat profession.
         for value in sheet.professions.values():
             if value >= 1:
                 result = 2
+
+        # Harbinger via the same route: a second-rank non-combat profession
+        # plus veteran garb. No combat styles required, matching the rules in
+        # content/proficiencies/index.md.
+        if result == 2 and sheet.veteran_garb:
+            if any(v >= 2 for v in sheet.professions.values()):
+                result = 3
 
     return result
 
