@@ -39,13 +39,14 @@ create table if not exists dues_paid (
 -- A seeded lookup table rather than an enum: the composite foreign key below
 -- enforces that a 'weapon' row carries a weapon name, which an enum cannot,
 -- and adding a proficiency later is an INSERT rather than an ALTER TYPE.
---   'weapon' | 'class' | 'profession'  0-3 proficiency levels
---   'counter'                          Light_Armor / Armor, unbounded ints
---   'flag'                             Steal_* / Look_Part, 0 or 1
+--
+-- Only 'weapon' for now. Classes, professions and the class counters/flags
+-- are being reworked, so they are deliberately absent: with nothing defined,
+-- the foreign key below makes it impossible to assign one to a member and
+-- then have to clean it up when the rework lands. Widen this check and seed
+-- the new definitions at that point.
 create table if not exists proficiency_defs (
-    kind text not null check (
-             kind in ('weapon', 'class', 'profession', 'counter', 'flag')
-         ),
+    kind text not null check (kind in ('weapon')),
     name text not null,
     primary key (kind, name)
 );
@@ -70,8 +71,8 @@ create table if not exists sync_state (
 
 insert into sync_state (id) values (1) on conflict (id) do nothing;
 
--- Seed the permitted proficiencies, mirroring content/proficiencies/ and the
--- [extra.*] tables in content/members/_*.md.
+-- Seed the permitted weapon styles. These match content/proficiencies/combat-styles.md
+-- and the [extra.weapons] tables in content/members/_*.md exactly -- 11 in each.
 insert into proficiency_defs (kind, name) values
     ('weapon', 'Single Sword'),
     ('weapon', 'Sword & Board'),
@@ -83,50 +84,5 @@ insert into proficiency_defs (kind, name) values
     ('weapon', 'Spear'),
     ('weapon', 'Rock'),
     ('weapon', 'Javelin'),
-    ('weapon', 'Archery'),
-
-    ('class', 'Scout'),
-    ('class', 'Archer'),
-    ('class', 'Ranger'),
-    ('class', 'Vanguard'),
-    ('class', 'Soldier'),
-    ('class', 'Berserker'),
-    ('class', 'Paladin'),
-    ('class', 'Shaman'),
-    ('class', 'Shieldman'),
-    ('class', 'Spearman'),
-    ('class', 'Thief'),
-    ('class', 'Assassin'),
-    ('class', 'Rogue'),
-    ('class', 'Swashbuckler'),
-
-    ('counter', 'Light_Armor'),
-    ('counter', 'Armor'),
-
-    ('flag', 'Steal_10'),
-    ('flag', 'Steal_20'),
-    ('flag', 'Steal_30'),
-    ('flag', 'Look_Part'),
-
-    ('profession', 'Armorsmith'),
-    ('profession', 'Entertainer'),
-    ('profession', 'Blacksmith'),
-    ('profession', 'Bookbinder'),
-    ('profession', 'Brewer'),
-    ('profession', 'Candlemaker'),
-    ('profession', 'Clothier'),
-    ('profession', 'Cook'),
-    ('profession', 'Fletcher'),
-    ('profession', 'Foamsmith'),
-    ('profession', 'Herald'),
-    ('profession', 'Herbalist'),
-    ('profession', 'Hunter'),
-    ('profession', 'Leatherworker'),
-    ('profession', 'Magistrate'),
-    ('profession', 'Medic'),
-    ('profession', 'Merchant'),
-    ('profession', 'Scribe'),
-    ('profession', 'Silversmith'),
-    ('profession', 'Weaponsmith'),
-    ('profession', 'Woodworker')
+    ('weapon', 'Archery')
 on conflict (kind, name) do nothing;

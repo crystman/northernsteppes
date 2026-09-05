@@ -20,7 +20,6 @@ from northernsteppes_bot import db  # noqa: E402
 from northernsteppes_bot.importer import (  # noqa: E402
     BOOTSTRAP_ACTOR,
     bootstrap,
-    classify,
     proficiency_rows,
 )
 from northernsteppes_bot.members import load_all  # noqa: E402
@@ -59,29 +58,19 @@ async def pool():
 
 # --- pure helpers, no database needed --------------------------------------
 
-def test_classify_separates_counters_and_flags():
-    assert classify("class", "Scout") == "class"
-    assert classify("class", "Light_Armor") == "counter"
-    assert classify("class", "Armor") == "counter"
-    assert classify("class", "Steal_10") == "flag"
-    assert classify("class", "Look_Part") == "flag"
-    assert classify("weapon", "Flail") == "weapon"
-
-
-def test_proficiency_rows_coerce_thief_flags_to_ints():
+def test_only_weapon_rows_are_imported():
+    """Classes, professions and the class counters/flags are being reworked,
+    so nothing defines them and nothing may be assigned. They are still parsed
+    off the sheet -- rank() needs them -- just not persisted."""
     sheet = MemberSheet(
         slug="x",
-        weapons={"Flail": 2},
+        weapons={"Flail": 2, "Rock": 1},
         professions={"Cook": 1},
-        classes={"Steal_10": True, "Look_Part": False, "Armor": 3, "Scout": 1},
+        classes={"Steal_10": True, "Armor": 3, "Scout": 1},
     )
-    rows = dict(((k, n), v) for k, n, v in proficiency_rows(sheet))
-    assert rows[("flag", "Steal_10")] == 1
-    assert rows[("flag", "Look_Part")] == 0
-    assert rows[("counter", "Armor")] == 3
-    assert rows[("class", "Scout")] == 1
-    assert rows[("weapon", "Flail")] == 2
-    assert rows[("profession", "Cook")] == 1
+    rows = proficiency_rows(sheet)
+    assert {k for k, _, _ in rows} == {"weapon"}
+    assert rows == [("weapon", "Flail", 2), ("weapon", "Rock", 1)]
 
 
 # --- against a real database ----------------------------------------------
@@ -175,18 +164,34 @@ async def test_unknown_proficiency_is_rejected(pool):
 
 
 @requires_db
-async def test_kind_and_name_must_agree(pool):
-    """A real proficiency name filed under the wrong kind is also rejected --
-    the thing an enum on `name` alone could not catch."""
+async def test_deferred_kinds_cannot_be_assigned(pool):
+    """The point of deferring: with no definitions for classes, professions,
+    counters or flags, the foreign key makes it impossible to assign one and
+    then have to clean it up when the rework lands."""
     await bootstrap(pool, MEMBERS_DIR)
     async with pool.acquire() as conn:
         member_id = await conn.fetchval("select id from members limit 1")
-        with pytest.raises(asyncpg.ForeignKeyViolationError):
-            await conn.execute(
-                "insert into proficiencies (member_id, kind, name, level)"
-                " values ($1, 'profession', 'Flail', 1)",
-                member_id,
-            )
+        for kind, name in [
+            ("profession", "Cook"),
+            ("class", "Scout"),
+            ("counter", "Armor"),
+            ("flag", "Steal_10"),
+            ("profession", "Flail"),   # real name, wrong kind
+        ]:
+            with pytest.raises(asyncpg.ForeignKeyViolationError):
+                await conn.execute(
+                    "insert into proficiencies (member_id, kind, name, level)"
+                    " values ($1, $2, $3, 1)",
+                    member_id, kind, name,
+                )
+
+
+@requires_db
+async def test_only_weapons_present_after_bootstrap(pool):
+    await bootstrap(pool, MEMBERS_DIR)
+    async with pool.acquire() as conn:
+        kinds = await conn.fetch("select distinct kind from proficiencies")
+    assert [r["kind"] for r in kinds] == ["weapon"]
 
 
 @requires_db

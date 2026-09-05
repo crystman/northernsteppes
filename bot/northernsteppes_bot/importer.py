@@ -14,7 +14,7 @@ from pathlib import Path
 
 import asyncpg
 
-from .members import CLASS_COUNTERS, CLASS_FLAGS, load_all
+from .members import load_all
 from .ranks import MemberSheet
 
 #: Marker used in dues_paid.recorded_by for rows that came from the files
@@ -40,29 +40,21 @@ class ImportResult:
         )
 
 
-def classify(kind_hint: str, name: str) -> str:
-    """Map a frontmatter key to a proficiencies.kind value."""
-    if kind_hint == "class":
-        if name in CLASS_COUNTERS:
-            return "counter"
-        if name in CLASS_FLAGS:
-            return "flag"
-    return kind_hint
-
-
 def proficiency_rows(sheet: MemberSheet) -> list[tuple[str, str, int]]:
-    """Flatten a sheet's weapons, professions and classes into rows."""
-    rows: list[tuple[str, str, int]] = []
-    for name, level in sheet.weapons.items():
-        rows.append(("weapon", name, int(level)))
-    for name, level in sheet.professions.items():
-        rows.append(("profession", name, int(level)))
-    for name, value in sheet.classes.items():
-        kind = classify("class", name)
-        # Thief flags are booleans in TOML; store them as 0/1.
-        level = int(bool(value)) if kind == "flag" else int(value or 0)
-        rows.append((kind, name, level))
-    return sorted(rows)
+    """Flatten a sheet's weapon styles into rows.
+
+    Weapons only. Classes, professions and the class counters/flags are being
+    reworked, so proficiency_defs defines none of them and the foreign key
+    would reject them. Leaving them out of the database entirely means there
+    is nothing to clean up when the rework lands.
+
+    They are still parsed from the files and still drive rank(), which reads
+    from a MemberSheet rather than from the database -- see the note in
+    DESIGN.md about where the read commands source them from.
+    """
+    return sorted(
+        ("weapon", name, int(level)) for name, level in sheet.weapons.items()
+    )
 
 
 async def import_member(conn: asyncpg.Connection, sheet: MemberSheet) -> str:
