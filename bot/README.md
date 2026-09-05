@@ -234,6 +234,35 @@ The bot lives under `bot/` in this repository, so a Railway service tracking
 `main` only has it once these changes are merged. Until then, point the service
 at a fork and branch.
 
+## Seeing a change on the website before the sync exists
+
+The website is static: Zola builds it from `content/members/*.md` and never
+reads the database. A change recorded in Discord is therefore invisible on the
+site until the sync commits the rendered files.
+
+Until that is configured, this closes the loop by hand -- same database, same
+renderer, same output, written to the working tree instead of committed:
+
+```bash
+cd bot
+python -m northernsteppes_bot.preview           # show the diff, change nothing
+python -m northernsteppes_bot.preview --write   # apply it
+cd .. && zola serve                             # look at the result
+git checkout -- content/members/                # undo
+```
+
+To read the deployed database without copying its URL anywhere:
+
+```bash
+railway run python -m northernsteppes_bot.preview
+```
+
+`railway run` injects the service's variables into a local command.
+
+Expect the first run to also show `kaigar`, `magnus` and `meatwolf` changing
+even if you have recorded nothing: that is the renderer retiring `Race` and
+migrating `Unit` to `Units`, which a real sync would do once.
+
 ## Identifying leadership
 
 Write commands are gated on a single Discord role, configured either way:
