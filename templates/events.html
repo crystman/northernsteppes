@@ -11,7 +11,10 @@
     {% else %}
         {% set pages = section.pages %}
     {% endif %}
-    {% for page in pages %}
+    {# sort_by = "date" gives newest first, so reverse for soonest first: the
+       script below removes events whose date has passed, leaving the next
+       event at the top -- which is what "Upcoming Events" implies. #}
+    {% for page in pages | reverse %}
     <article class="post-entry" id="{{ page.slug }}">
       <header class="entry-header">
           <h2>{{ page.title }}</h2>
