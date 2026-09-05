@@ -163,8 +163,27 @@ class NorthernSteppesBot(discord.Client):
                 self.config.leadership_role_name, resolved,
             )
 
+    def _log_guilds(self) -> None:
+        """List every guild this token is in, and flag unexpected ones.
+
+        A token invited to more than the configured server is worth knowing
+        about: it is how a test instance ends up answering in the real one.
+        """
+        others = [g for g in self.guilds if g.id != self.config.guild_id]
+        log.info(
+            "in %d guild(s); configured for %s",
+            len(self.guilds), self.config.guild_id,
+        )
+        if others:
+            log.warning(
+                "also in %s -- commands are not registered there and writes "
+                "from there are refused, but this token is shared with them",
+                ", ".join(f"{g.name} ({g.id})" for g in others),
+            )
+
     async def on_ready(self) -> None:
         await self._apply_leadership_role()
+        self._log_guilds()
         log.info(
             "connected as %s | %s | %d members loaded",
             self.user, self.config.describe_posture(), len(self.directory.all()),
@@ -219,6 +238,15 @@ def build_tree(bot: NorthernSteppesBot) -> None:
         Checked inside the handler. default_member_permissions only hides a
         command in the picker; it does not stop anyone who knows its name.
         """
+        # Writes only from the configured guild. A bot invited to more than
+        # one server -- a test instance also added to the real one, say --
+        # must not edit real records from the wrong place.
+        if interaction.guild_id != bot.config.guild_id:
+            log.warning(
+                "refused a write from guild %s; configured for %s",
+                interaction.guild_id, bot.config.guild_id,
+            )
+            return views.format_wrong_guild()
         if not bot.config.write_commands_enabled or bot.store is None:
             return views.format_writes_disabled(bot.config)
         roles = getattr(interaction.user, "roles", None) or []

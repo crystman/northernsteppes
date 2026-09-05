@@ -10,6 +10,7 @@ Nothing here connects, logs in, or needs a token.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -125,8 +126,15 @@ def test_env_file_fills_in_what_the_environment_lacks(monkeypatch):
         monkeypatch.setattr(entry, "ENV_FILE", env)
         monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
 
-        assert entry.load_env_file() is True
-        assert Config.from_env().guild_id == 4242
+        try:
+            assert entry.load_env_file() is True
+            assert Config.from_env().guild_id == 4242
+        finally:
+            # load_dotenv writes straight into os.environ, which monkeypatch
+            # does not track. Without this the value leaks into every test
+            # that runs afterwards -- it was making the guild-scoping tests
+            # fail in a full run while passing in isolation.
+            os.environ.pop("DISCORD_GUILD_ID", None)
 
 
 # --- background member refresh ---------------------------------------------
@@ -198,13 +206,19 @@ class FakeUser:
 
 
 class FakeInteraction:
-    def __init__(self, user): self.user = user
+    """Defaults to the configured guild, so tests that are about the role
+    check are not accidentally testing the guild check."""
+
+    def __init__(self, user, guild_id=DEFAULT_GUILD_ID):
+        self.user = user
+        self.guild_id = guild_id
 
 
 @pytest.fixture
 def write_bot(monkeypatch):
     """A bot with the write commands registered but nothing configured."""
-    for name in ("DISCORD_TOKEN", "LEADERSHIP_ROLE_ID", "DATABASE_URL"):
+    for name in ("DISCORD_TOKEN", "LEADERSHIP_ROLE_ID", "DATABASE_URL",
+                 "DISCORD_GUILD_ID"):
         monkeypatch.delenv(name, raising=False)
     from northernsteppes_bot.bot import build_write_tree
     directory = MemberDirectory(MEMBERS_DIR)
@@ -364,3 +378,43 @@ def test_refresh_does_not_block_the_event_loop(bot, monkeypatch):
     assert elapsed < 0.25, (
         f"event loop was blocked for {elapsed:.2f}s during a refresh"
     )
+
+
+# --- guild scoping ---------------------------------------------------------
+
+class GuildInteraction:
+    def __init__(self, guild_id, user): self.guild_id, self.user = guild_id, user
+
+
+def _configured(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    write_bot.config = Config.from_env()
+    write_bot.store = object()
+    return write_bot
+
+
+def test_writes_refused_from_another_guild(write_bot, monkeypatch):
+    """A test instance invited to the real server must not edit real records."""
+    import asyncio
+    bot = _configured(write_bot, monkeypatch)
+    other = GuildInteraction(999999999, FakeUser(555))
+    msg = asyncio.run(bot._require_leadership(other))
+    assert msg is not None and "different server" in msg
+
+
+def test_writes_allowed_from_the_configured_guild(write_bot, monkeypatch):
+    import asyncio
+    bot = _configured(write_bot, monkeypatch)
+    here = GuildInteraction(bot.config.guild_id, FakeUser(555))
+    assert asyncio.run(bot._require_leadership(here)) is None
+
+
+def test_guild_check_precedes_the_role_check(write_bot, monkeypatch):
+    """Wrong server should say so, rather than leaking whether the caller
+    would otherwise have had permission."""
+    import asyncio
+    bot = _configured(write_bot, monkeypatch)
+    other = GuildInteraction(999999999, FakeUser(None))
+    msg = asyncio.run(bot._require_leadership(other))
+    assert "different server" in msg

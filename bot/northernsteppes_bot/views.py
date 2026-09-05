@@ -215,6 +215,20 @@ def format_writes_disabled(config) -> str:
     )
 
 
+def format_wrong_guild() -> str:
+    """Refuse a write from a server this bot is not configured for.
+
+    Role ids are unique per guild, so a leadership role elsewhere would not
+    have matched anyway -- but relying on that is implicit. Saying no
+    explicitly means a test deployment invited to the real server cannot edit
+    real records by accident.
+    """
+    return (
+        "🚫 This bot instance is configured for a different server, so it "
+        "will not change records from here."
+    )
+
+
 def format_not_leadership() -> str:
     return "🔒 Only leadership can use that command."
 
