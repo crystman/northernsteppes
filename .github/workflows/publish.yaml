@@ -32,6 +32,7 @@ jobs:
     - name: Checkout main
       uses: actions/checkout@v3
     - name: Setup Pages
+      id: pages
       uses: actions/configure-pages@v3
     # Pinned to v0.22.1: the action's tags mirror the bundled Zola version.
     # Zola 0.23 is a breaking release (Tera v2; macros, imports and shortcodes
@@ -42,6 +43,15 @@ jobs:
       env:
         BUILD_ONLY: true
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # config.toml pins base_url to northernsteppes.com, and Zola writes
+        # absolute URLs from it -- so a fork's Pages build emits links and a
+        # stylesheet pointing at the production site, and is not browsable.
+        # Forks build for their own Pages URL instead. Left empty upstream, so
+        # the production build is byte-identical to before.
+        BUILD_FLAGS: >-
+          ${{ github.repository == 'jackhumbert/northernsteppes'
+              && ''
+              || format('--base-url {0}', steps.pages.outputs.base_url) }}
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
