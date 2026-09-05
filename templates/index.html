@@ -212,6 +212,20 @@
                         }
                     </script>
                     {% endfor %}
+
+                    {#- Same as the events page: with every event past, this
+                        block left a bare "Next Event" heading on the front
+                        page. -#}
+                    <p id="no-next-event" hidden>
+                        Nothing is scheduled just yet —
+                        <a href="{{ get_url(path="practice", trailing_slash=true) }}">weekly practices</a>
+                        carry on as usual.
+                    </p>
+                    <script>
+                        if (!document.querySelector("main .post-content h3 a")) {
+                            document.getElementById("no-next-event").hidden = false;
+                        }
+                    </script>
                 {# </div> #}
 
                 {# <h2>Latest News</h2>      
