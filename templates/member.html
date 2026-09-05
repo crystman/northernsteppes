@@ -24,38 +24,7 @@
 
 {% set rank_names = ["Unranked", "Peasant", "Savage", "Harbinger"] %}
 
-{% set_global rank = 0 %}
-
-{% if page.extra.Waiver %}
-    {% set_global rank = 1 %}
-    {% if page.extra.Dues %}
-        {% if page.extra.weapons['Single Sword'] > 0 and page.extra.weapons['Sword & Board'] > 0 and page.extra.weapons.Rock > 0 and page.extra.weapons.Javelin > 0 %}
-            {% set_global rank = 2 %}
-            {% if page.extra.Veteran_Garb %}
-                {% for prof, value in page.extra.professions %}
-                    {% if value >= 2 and page.extra.Veteran_Garb %}
-                        {% set_global rank = 3 %}
-                    {% endif %}
-                {% endfor %}
-                {% if rank != 3 %}
-                    {% set_global rank = 3 %}
-                    {% for weapon, value in page.extra.weapons %}
-                        {% if value == 0 %}
-                            {% set_global rank = 2 %}
-                        {% endif %}
-                    {% endfor %}
-                {% endif %}
-            {% endif %}
-        {% else %}
-            {% for prof, value in page.extra.professions %}
-                {% if value >= 1 %}
-                    {% set_global rank = 2 %}
-                {% endif %}
-            {% endfor %}
-        {% endif %}
-    {% endif %}
-{% endif %}
-
+{% set rank = ranks::rank(extra=page.extra) | trim | int %}
 
 <dl>
     <dt><a href="{{ get_url(path="proficiencies/#ranks") }}">Rank</a></dt><dd>{{ rank_names[rank] }}</dd>
