@@ -3,6 +3,7 @@ public/
 *.aux
 *.fdb_latexmk
 *.fls
+*.log
 *.loc
 *.soc
 *.synctex.gz
