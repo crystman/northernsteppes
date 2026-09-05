@@ -8,6 +8,7 @@ message does not break the suite.
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 import pytest
@@ -82,8 +83,11 @@ def test_gaps_lists_every_gap(sheets):
 
 
 def test_gaps_says_so_at_the_top_rank():
-    m = MemberSheet(slug="x", display_name="X", waiver=True, dues=True,
-                    veteran_garb=True, professions={"Cook": 2})
+    # Dues are recorded for the current year, so this holds whatever the date
+    # -- paying this year always counts, grace window or not.
+    m = MemberSheet(slug="x", display_name="X", waiver=True,
+                    veteran_garb=True, professions={"Cook": 2},
+                    dues_years={dt.date.today().year: True})
     assert gaps(m) == []
     assert "Nothing left" in views.format_gaps(m)
 

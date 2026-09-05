@@ -11,12 +11,15 @@ discord.py -- these are strings.
 from __future__ import annotations
 
 from .ranks import (
+    DUES_BEHIND,
+    DUES_PAID,
     LEVEL_NAMES,
     RANK_NAMES,
     SCOUT_NAMES,
     SOLDIER_NAMES,
     THIEF_NAMES,
     MemberSheet,
+    dues_state,
     gaps,
     rank,
     scout_rank,
@@ -44,6 +47,25 @@ def truncate(text: str, limit: int = MESSAGE_LIMIT) -> str:
     return cut + notice
 
 
+def describe_dues(sheet: MemberSheet, today=None) -> str:
+    """One line describing dues, distinguishing "behind" from "never paid".
+
+    Three states rather than two. The old display read the `Dues` flag, which
+    is true for every member regardless of what they have actually paid, so
+    everyone showed an identical tick while /roster reported nobody as current.
+    The warning says "you are a member, but not up to date" without implying
+    either extreme.
+    """
+    import datetime as _dt
+    year = (today or _dt.date.today()).year
+    state = dues_state(sheet, today)
+    if state == DUES_PAID:
+        return f"✅ Dues paid for {year}"
+    if state == DUES_BEHIND:
+        return f"⚠️ Dues not up to date — nothing recorded for {year}"
+    return "❌ No dues ever recorded"
+
+
 def _name(sheet: MemberSheet) -> str:
     return sheet.display_name or sheet.slug
 
@@ -55,10 +77,8 @@ def format_rank(sheet: MemberSheet) -> str:
 
     lines.append("**Why**")
     lines.append(f"{'✅' if sheet.waiver else '❌'} Waiver on file")
-    lines.append(f"{'✅' if sheet.dues else '❌'} Dues paid")
-    lines.append(
-        f"{'✅' if sheet.veteran_garb else '❌'} Veteran garb"
-    )
+    lines.append(describe_dues(sheet))
+    lines.append(f"{'✅' if sheet.veteran_garb else '❌'} Veteran garb")
 
     ladders = [
         ("Scout", SCOUT_NAMES[scout_rank(sheet, r)]),

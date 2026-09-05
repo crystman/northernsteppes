@@ -8,11 +8,18 @@ test_parity.py.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from northernsteppes_bot.ranks import (
     BASIC_STYLES,
+    DUES_BEHIND,
+    DUES_NEVER,
+    DUES_PAID,
     MemberSheet,
+    dues_state,
+    has_ever_paid,
     gaps,
     rank,
     rank_name,
@@ -36,13 +43,27 @@ ALL_STYLES = (
 )
 
 
+#: Fixed clock for every test here. Without it the suite would change
+#: behaviour on 1 January and again on 1 April, when the dues grace period
+#: opens and closes. Mid-June: well outside the grace window.
+TODAY = date(2026, 6, 15)
+
+
 def sheet(**overrides) -> MemberSheet:
-    """A member with every style and profession at zero."""
+    """A member with every style and profession at zero.
+
+    `dues=True` records dues for TODAY's year, since rank now reads the
+    per-year table rather than the legacy flag.
+    """
+    dues = overrides.pop("dues", False)
+    overrides.setdefault(
+        "dues_years", {TODAY.year: True} if dues else {}
+    )
     base = dict(
         slug="test",
         display_name="Test",
         waiver=False,
-        dues=False,
+        dues=dues,
         veteran_garb=False,
         weapons={s: 0 for s in ALL_STYLES},
         professions={"Armorsmith": 0, "Blacksmith": 0, "Cook": 0},
@@ -238,3 +259,61 @@ def test_gaps_offers_both_routes_to_a_combat_savage():
     text = " ".join(gaps(m))
     assert "non-combat profession" in text
     assert "Archery" in text, "should name the styles still unproficient"
+
+
+# --- dues states ----------------------------------------------------------
+
+def paid(*years) -> MemberSheet:
+    """A member who would be Savage, if their dues count."""
+    m = sheet(waiver=True, weapons={s: 1 for s in BASIC_STYLES})
+    m.dues_years = {y: True for y in years}
+    return m
+
+
+def test_current_year_dues_show_as_paid():
+    assert dues_state(paid(2026), date(2026, 6, 15)) == DUES_PAID
+
+
+def test_old_dues_show_as_behind():
+    assert dues_state(paid(2024), date(2026, 6, 15)) == DUES_BEHIND
+
+
+def test_no_dues_at_all_shows_as_never():
+    assert dues_state(paid(), date(2026, 6, 15)) == DUES_NEVER
+
+
+def test_current_year_wins_over_older_years():
+    assert dues_state(paid(2024, 2026), date(2026, 6, 15)) == DUES_PAID
+
+
+def test_a_year_recorded_false_does_not_count():
+    m = paid()
+    m.dues_years = {2025: False}
+    assert has_ever_paid(m) is False
+    assert dues_state(m, date(2026, 6, 15)) == DUES_NEVER
+
+
+# --- what dues gate ---------------------------------------------------------
+
+def test_being_behind_does_not_cost_a_rank():
+    """The point: a lapsed member has not un-earned their proficiencies."""
+    m = paid(2024)
+    assert dues_state(m, date(2026, 6, 15)) == DUES_BEHIND
+    assert rank_name(m) == "Savage"
+
+
+def test_never_paying_caps_at_peasant():
+    m = paid()
+    assert rank_name(m) == "Peasant"
+
+
+def test_rank_does_not_change_with_the_date():
+    """Rank is deliberately clock-independent now, so nobody is demoted by the
+    calendar rolling over."""
+    m = paid(2024)
+    assert rank(m) == 2
+
+
+def test_gaps_asks_for_dues_only_when_never_paid():
+    assert "Pay membership dues" in gaps(paid())
+    assert "Pay membership dues" not in gaps(paid(2024))

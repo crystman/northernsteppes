@@ -15,6 +15,7 @@ database, no network, no Discord.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 
 RANK_NAMES = ("Unranked", "Peasant", "Savage", "Harbinger")
 LEVEL_NAMES = ("-", "Proficient", "Adept", "Master")
@@ -62,6 +63,40 @@ def has_basic_styles(sheet: MemberSheet) -> bool:
     return all(sheet.weapon(style) > 0 for style in BASIC_STYLES)
 
 
+DUES_PAID = "paid"
+DUES_BEHIND = "behind"
+DUES_NEVER = "never"
+
+
+def has_ever_paid(sheet: MemberSheet) -> bool:
+    """Whether any year is recorded as paid.
+
+    This, rather than the current year, is what gates rank. Ranks are earned
+    accolades: a member who has fallen behind on dues has not un-earned their
+    proficiencies, and stripping them on a date boundary would misrepresent
+    what they can actually do. Being behind is surfaced in the display
+    instead.
+    """
+    return any(sheet.dues_years.values())
+
+
+def dues_state(sheet: MemberSheet, today: date | None = None) -> str:
+    """How a member's dues stand, for display.
+
+    ``paid``    recorded for the current year.
+    ``behind``  has paid before, but not for the current year.
+    ``never``   no dues recorded at all.
+
+    Only ``never`` affects rank; ``behind`` is a warning, not a demotion.
+    """
+    today = today or date.today()
+    if sheet.paid_for(today.year):
+        return DUES_PAID
+    if has_ever_paid(sheet):
+        return DUES_BEHIND
+    return DUES_NEVER
+
+
 def rank(sheet: MemberSheet) -> int:
     """Overall rank, 0-3, indexing into :data:`RANK_NAMES`.
 
@@ -74,7 +109,7 @@ def rank(sheet: MemberSheet) -> int:
 
     # Peasant: waiver on file.
     result = 1
-    if not sheet.dues:
+    if not has_ever_paid(sheet):
         return result
 
     if has_basic_styles(sheet):
@@ -174,7 +209,7 @@ def gaps(sheet: MemberSheet) -> list[str]:
 
     if current == 1:
         needs: list[str] = []
-        if not sheet.dues:
+        if not has_ever_paid(sheet):
             needs.append("Pay membership dues")
         missing = [s for s in BASIC_STYLES if sheet.weapon(s) == 0]
         if missing and not any(v >= 1 for v in sheet.professions.values()):

@@ -104,11 +104,23 @@
    The scout/soldier/thief macros below take that value as their `rank`
    argument, since the class ladders gate on it. #}
 {% macro rank(extra) %}
+{#- Dues gate rank on whether the member has ever paid, not on the current
+    year. Ranks are earned accolades: falling behind on dues does not un-earn
+    a proficiency. Being behind is surfaced in the bot's /rank output as a
+    warning instead. -#}
+{%- set_global dues_ok = false -%}
+{%- if extra.dues -%}
+    {%- for year, paid in extra.dues -%}
+        {%- if paid -%}
+            {%- set_global dues_ok = true -%}
+        {%- endif -%}
+    {%- endfor -%}
+{%- endif -%}
 {%- set_global r = 0 -%}
 {# Peasant: waiver on file #}
 {%- if extra.Waiver -%}
     {%- set_global r = 1 -%}
-    {%- if extra.Dues -%}
+    {%- if dues_ok -%}
         {# Savage: dues paid, plus all four basic combat styles... #}
         {%- if extra.weapons['Single Sword'] > 0 and extra.weapons['Sword & Board'] > 0 and extra.weapons.Rock > 0 and extra.weapons.Javelin > 0 -%}
             {%- set_global r = 2 -%}
