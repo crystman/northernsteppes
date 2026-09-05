@@ -86,13 +86,13 @@ create table dues_paid (
 
 -- The set of proficiencies is fixed by content/proficiencies/ and effectively
 -- never changes, so it is constrained in the database rather than only in
--- code. This is a seeded lookup table rather than an enum: a composite
--- foreign key can enforce that a 'weapon' row carries a weapon name, which an
--- enum cannot, and adding one later is an INSERT rather than an ALTER TYPE.
+-- code. A seeded lookup table rather than an enum: a composite foreign key
+-- can enforce that a 'weapon' row carries a weapon name, which an enum
+-- cannot, and adding one later is an INSERT rather than an ALTER TYPE.
+--
+-- Weapons only for now -- see the deferral note below.
 create table proficiency_defs (
-    kind text not null check (
-             kind in ('weapon', 'class', 'profession', 'counter', 'flag')
-         ),
+    kind text not null check (kind in ('weapon')),
     name text not null,
     primary key (kind, name)
 );
@@ -114,18 +114,36 @@ create table sync_state (
 );
 ```
 
-`proficiency_defs` is seeded from `content/proficiencies/` in the same
-migration, so a typo in a command cannot invent a proficiency the site
-templates do not render -- the insert fails rather than silently creating a
-"Sword and Board" that never displays.
+`proficiency_defs` is seeded in the same migration, so a typo in a command
+cannot invent a proficiency the site templates do not render — the insert
+fails rather than silently creating a "Sword and Board" that never displays.
 
-**Deferred for now:** `awards`, `practices`, `attendance` and `event_rsvps`.
-Worth noting what that costs: those were the append-only, genuinely
-database-shaped tables. What remains is a mirror of data that already lives in
-git. The database still earns its place as the write buffer that makes the
-debounced sync possible, and as the query store behind instant `/rank` and
-`/roster` replies -- but if those four stay deferred indefinitely, reading the
-member files straight from GitHub would be a reasonable simplification.
+**Deferred for now:** `awards`, `practices`, `attendance` and `event_rsvps`,
+plus the `class`, `profession`, `counter` and `flag` proficiency kinds.
+
+The proficiency kinds are deferred because that system is being reworked.
+Defining none of them means the composite foreign key makes it impossible to
+assign one to a member and then have to clean it up later. The eleven weapon
+styles are seeded and match `content/proficiencies/combat-styles.md` and the
+`[extra.weapons]` tables exactly.
+
+Nothing is removed from the member files, so no data is lost — those fields
+simply stay hand-edited and outside the bot's control until the rework lands.
+
+**This splits where the read commands get their data.** `rank()` needs
+professions (the route to Savage) and classes (the scout, soldier and thief
+ladders), and neither is in the database. The rank rules already operate on a
+`MemberSheet` parsed from the member files rather than on database rows, so
+`/rank` and `/gaps` read weapons and dues from Postgres and the rest from the
+files. That is workable but it is a second data path, and it should collapse
+back into one once the proficiency rework lands.
+
+Worth noting what deferring the four tables costs: those were the append-only,
+genuinely database-shaped data. What remains is a mirror of data that already
+lives in git. The database still earns its place as the write buffer that makes
+the debounced sync possible, and as the query store behind instant `/roster`
+replies — but if those four stay deferred indefinitely, reading the member
+files straight from GitHub would be a reasonable simplification.
 
 Dropping `awards` also means the record of *who* awarded a proficiency now
 lives only in the git commit that recorded it, rather than in a queryable
