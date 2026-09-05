@@ -1,0 +1,26 @@
+{
+    // Requires Zola 0.22.1 on PATH -- see "Local Development" in readme.md.
+    // Zola 0.23.x cannot build this site.
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Zola: serve",
+            "detail": "Live-reloading preview at http://127.0.0.1:1111",
+            "type": "shell",
+            "command": "zola",
+            "args": ["serve"],
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "Zola: build",
+            "detail": "One-off build into public/",
+            "type": "shell",
+            "command": "zola",
+            "args": ["build"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": []
+        }
+    ]
+}
