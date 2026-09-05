@@ -6,3 +6,5 @@ public/
 *.loc
 *.soc
 *.synctex.gz
+# Zola writes a resized-image cache here during builds
+static/processed_images/
