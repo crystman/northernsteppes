@@ -254,7 +254,30 @@ def build_tree(bot: NorthernSteppesBot) -> None:
             return views.format_not_leadership()
         return None
 
+    async def own_sheet(interaction):
+        """The caller's own member sheet, if their Discord is linked.
+
+        Returns (sheet, error). Looks the link up rather than matching on a
+        Discord display name: names are not unique and are freely editable,
+        so matching on one could show somebody else's record.
+        """
+        if bot.store is None:
+            return None, views.format_unlinked(current_year())
+        try:
+            slug = await bot.store.slug_for_discord(interaction.user.id)
+        except Exception:
+            log.exception("could not look up the Discord link")
+            return None, views.format_unlinked(current_year())
+        if slug is None:
+            return None, views.format_unlinked(current_year())
+        sheet = next((s for s in await sheets() if s.slug == slug), None)
+        if sheet is None:
+            # Linked to a member that no longer exists.
+            return None, views.format_link_dangling(slug)
+        return sheet, None
+
     # Shared with build_write_tree, which registers the gated commands.
+    bot._own_sheet = own_sheet
     bot._resolve = resolve_async
     bot._require_leadership = _require_leadership
 
@@ -272,8 +295,13 @@ def build_tree(bot: NorthernSteppesBot) -> None:
     @app_commands.autocomplete(member=member_autocomplete)
     async def rank_cmd(interaction: discord.Interaction, member: str | None = None):
         if member is None:
+            sheet, error = await own_sheet(interaction)
+            if error:
+                return await interaction.response.send_message(
+                    error, ephemeral=True
+                )
             return await interaction.response.send_message(
-                views.format_unlinked(current_year()), ephemeral=True
+                views.format_rank(sheet)
             )
         sheet, error = resolve(member)
         if error:
@@ -297,12 +325,12 @@ def build_tree(bot: NorthernSteppesBot) -> None:
 
     @tree.command(name="me", description="Show your own proficiency sheet")
     async def me_cmd(interaction: discord.Interaction):
-        # Requires a member <-> Discord mapping, which needs /link, which is a
-        # leadership-gated write command. Until then this explains itself
-        # rather than guessing from nicknames -- matching on a Discord display
-        # name would show somebody else's sheet to the wrong person.
+        sheet, error = await own_sheet(interaction)
+        if error:
+            return await interaction.response.send_message(error, ephemeral=True)
+        # Ephemeral: a member's own sheet is for them, not the channel.
         await interaction.response.send_message(
-            views.format_unlinked(current_year()), ephemeral=True
+            views.format_sheet(sheet), ephemeral=True
         )
 
 

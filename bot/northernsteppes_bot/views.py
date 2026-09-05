@@ -191,6 +191,14 @@ def format_ambiguous(query: str, matches: list[MemberSheet]) -> str:
     )
 
 
+def format_link_dangling(slug: str) -> str:
+    """The link points at a member record that no longer exists."""
+    return (
+        f"⚠️ Your Discord account is linked to `{slug}`, which no longer has "
+        "a member record. Ask leadership to re-link you."
+    )
+
+
 def format_unlinked(year: int) -> str:
     return (
         "Your Discord account isn't linked to a member record yet, so I don't "

@@ -350,3 +350,30 @@ async def test_sync_status_reports_clean_then_dirty(store):
     status = await sync_status(store)
     assert status["dirty_since"] is not None
     assert status["members"] == len(load_all(MEMBERS_DIR))
+
+
+# --- /me resolving through the link ----------------------------------------
+
+@requires_db
+async def test_own_sheet_flow_after_linking(store):
+    """What /me does: Discord id -> slug -> sheet."""
+    await store.link_discord("lamp", 4242)
+    slug = await store.slug_for_discord(4242)
+    assert slug == "lamp"
+
+    merged = {s.slug: s for s in await store.overlay(load_all(MEMBERS_DIR))}
+    assert merged[slug].display_name == "Lamp"
+
+
+@requires_db
+async def test_unlinked_discord_id_resolves_to_nothing(store):
+    assert await store.slug_for_discord(999999) is None
+
+
+@requires_db
+async def test_link_survives_other_writes(store):
+    """Recording dues must not disturb the Discord mapping."""
+    await store.link_discord("lamp", 4242)
+    await store.record_dues("lamp", 2026, ACTOR)
+    await store.set_flag("lamp", "veteran_garb", False, ACTOR)
+    assert await store.slug_for_discord(4242) == "lamp"
