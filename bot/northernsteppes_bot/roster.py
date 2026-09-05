@@ -38,9 +38,15 @@ class MemberDirectory:
     """Loads member sheets and looks them up by slug, name or Discord id."""
 
     def __init__(self, members_dir: Path | None = None,
-                 ttl_seconds: int = DEFAULT_TTL_SECONDS) -> None:
+                 ttl_seconds: int = DEFAULT_TTL_SECONDS,
+                 auto_reload: bool = True) -> None:
         self.members_dir = members_dir or default_members_dir()
         self.ttl_seconds = ttl_seconds
+        # When False, all() never reloads on the calling path. The bot sets
+        # this and refreshes on a background task instead: autocomplete fires
+        # on every keystroke, and a reload landing on one of them stalls it
+        # while 21 files are re-parsed.
+        self.auto_reload = auto_reload
         self._sheets: list[MemberSheet] = []
         self._loaded_at: float | None = None
 
@@ -50,14 +56,19 @@ class MemberDirectory:
         self._loaded_at = time.monotonic()
         return self._sheets
 
-    def all(self) -> list[MemberSheet]:
-        # >= rather than >, so ttl_seconds=0 means "always reload". With > it
-        # meant "reload after strictly more than 0 seconds", which never fires
+    def is_stale(self) -> bool:
+        if self._loaded_at is None:
+            return True
+        # >= rather than >, so ttl_seconds=0 means "always stale". With > it
+        # meant "stale after strictly more than 0 seconds", which never fires
         # when two calls land inside one clock tick -- time.monotonic() has
         # ~15.6ms resolution on Windows.
-        if self._loaded_at is None or (
-            time.monotonic() - self._loaded_at >= self.ttl_seconds
-        ):
+        return time.monotonic() - self._loaded_at >= self.ttl_seconds
+
+    def all(self) -> list[MemberSheet]:
+        # Never loads on this path when auto_reload is off, except the very
+        # first call, which would otherwise return an empty roster.
+        if self._loaded_at is None or (self.auto_reload and self.is_stale()):
             self.load()
         return self._sheets
 

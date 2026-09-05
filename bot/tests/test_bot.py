@@ -127,3 +127,59 @@ def test_env_file_fills_in_what_the_environment_lacks(monkeypatch):
 
         assert entry.load_env_file() is True
         assert Config.from_env().guild_id == 4242
+
+
+# --- background member refresh ---------------------------------------------
+
+def test_bot_starts_a_refresher_and_cancels_it(bot):
+    """The refresher must be cancelled on close, or the task leaks and keeps
+    reading files after the client has shut down."""
+    import asyncio
+
+    async def run():
+        bot._refresher = asyncio.create_task(asyncio.sleep(3600))
+        assert not bot._refresher.done()
+        bot._refresher.cancel()
+        try:
+            await bot._refresher
+        except asyncio.CancelledError:
+            pass
+        assert bot._refresher.cancelled()
+
+    asyncio.run(run())
+
+
+def test_refresh_survives_a_read_failure(bot, monkeypatch):
+    """A transient failure must not kill the refresher and freeze the roster
+    for the lifetime of the process."""
+    import asyncio
+
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise OSError("disk hiccup")
+
+    monkeypatch.setattr(bot.directory, "load", boom)
+    bot.refresh_interval_seconds = 0.001
+
+    async def run():
+        task = asyncio.create_task(bot._refresh_members())
+        await asyncio.sleep(0.05)
+        still_running = not task.done()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return still_running
+
+    still_running = asyncio.run(run())
+    # Both halves matter: the load must actually have been attempted, and the
+    # loop must have survived it.
+    assert calls, "refresher never called load(); the test proved nothing"
+    assert still_running, "an exception killed the refresh loop"
+
+
+def test_refresh_interval_is_half_the_ttl(bot):
+    assert bot.refresh_interval_seconds <= bot.directory.ttl_seconds

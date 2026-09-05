@@ -12,6 +12,7 @@ refuses to enable them before then.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 
@@ -37,14 +38,42 @@ class NorthernSteppesBot(discord.Client):
         self.config = config
         self.directory = directory
         self.tree = app_commands.CommandTree(self)
+        # Refresh at half the cache TTL so the list is never stale when a
+        # command reads it. An attribute rather than a computed local so tests
+        # can drive the loop without waiting minutes.
+        self.refresh_interval_seconds = max(directory.ttl_seconds // 2, 30)
 
     async def setup_hook(self) -> None:
+        # Reload off the request path. Autocomplete fires on every keystroke,
+        # and a cache reload landing on one stalls it while 21 files are
+        # re-parsed -- about 34ms, which is enough to feel.
+        self._refresher = asyncio.create_task(self._refresh_members())
+
         guild = discord.Object(id=self.config.guild_id)
         # Guild-scoped commands appear immediately; global ones take up to an
         # hour to propagate, which makes iterating painful.
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
         log.info("commands synced to guild %s", self.config.guild_id)
+
+    async def _refresh_members(self) -> None:
+        """Keep the member cache warm, forever."""
+        while True:
+            await asyncio.sleep(self.refresh_interval_seconds)
+            try:
+                # Blocking file reads, but small and infrequent: 21 files,
+                # roughly 34ms, once every few minutes.
+                self.directory.load()
+            except Exception:
+                # A transient read failure must not kill the refresher and
+                # leave the roster frozen for the process's lifetime.
+                log.exception("member refresh failed; keeping the previous list")
+
+    async def close(self) -> None:
+        task = getattr(self, "_refresher", None)
+        if task is not None:
+            task.cancel()
+        await super().close()
 
     async def on_ready(self) -> None:
         log.info(

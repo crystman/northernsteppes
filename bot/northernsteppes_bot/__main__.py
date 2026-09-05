@@ -60,7 +60,9 @@ def main() -> int:
         )
         return 1
 
-    directory = MemberDirectory()
+    # The bot refreshes on a background task, so the request path never
+    # pays for a reload.
+    directory = MemberDirectory(auto_reload=False)
     if not directory.members_dir.is_dir():
         log.error(
             "member files not found at %s. Set MEMBERS_DIR if the deployment "

@@ -114,3 +114,34 @@ def test_cache_holds_within_ttl():
 
         (tmp / "_second.md").write_text(src, encoding="utf-8")
         assert len(d.all()) == 1, "should still be serving the cached list"
+
+
+# --- background refresh ----------------------------------------------------
+
+def test_auto_reload_off_keeps_serving_the_cached_list():
+    """The bot disables auto-reload and refreshes on a background task, so no
+    autocomplete keystroke ever pays for re-parsing 21 files."""
+    src = (MEMBERS_DIR / "_lamp.md").read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        (tmp / "_lamp.md").write_text(src, encoding="utf-8")
+        d = MemberDirectory(tmp, ttl_seconds=0, auto_reload=False)
+        assert len(d.all()) == 1
+
+        (tmp / "_second.md").write_text(src, encoding="utf-8")
+        assert d.is_stale() is True, "should still report itself stale"
+        assert len(d.all()) == 1, "but must not reload on the request path"
+
+        d.load()
+        assert len(d.all()) == 2, "an explicit refresh still works"
+
+
+def test_first_call_loads_even_with_auto_reload_off():
+    """Otherwise every command would answer from an empty roster until the
+    first background tick."""
+    src = (MEMBERS_DIR / "_lamp.md").read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        (tmp / "_lamp.md").write_text(src, encoding="utf-8")
+        d = MemberDirectory(tmp, auto_reload=False)
+        assert len(d.all()) == 1
