@@ -129,13 +129,22 @@
                     {%- endfor -%}
                 {%- endif -%}
             {%- endif -%}
-        {# ...or one proficient non-combat profession instead of the styles #}
+        {# Savage via one proficient non-combat profession instead of styles #}
         {%- else -%}
             {%- for prof, value in extra.professions -%}
                 {%- if value >= 1 -%}
                     {%- set_global r = 2 -%}
                 {%- endif -%}
             {%- endfor -%}
+            {# Harbinger via the same route: a second-rank non-combat
+               profession plus veteran garb. No combat styles required. #}
+            {%- if r == 2 and extra.Veteran_Garb -%}
+                {%- for prof, value in extra.professions -%}
+                    {%- if value >= 2 -%}
+                        {%- set_global r = 3 -%}
+                    {%- endif -%}
+                {%- endfor -%}
+            {%- endif -%}
         {%- endif -%}
     {%- endif -%}
 {%- endif -%}
