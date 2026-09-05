@@ -13,6 +13,7 @@ refuses to enable them before then.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import logging
 
@@ -102,7 +103,65 @@ class NorthernSteppesBot(discord.Client):
             task.cancel()
         await super().close()
 
+    def resolve_leadership_role(self, roles) -> int | None:
+        """Match LEADERSHIP_ROLE_NAME against the guild's roles.
+
+        Returns the id only on an unambiguous match. Discord allows several
+        roles to share a name, so a duplicate is refused rather than guessed
+        at -- guessing is how write access lands on the wrong role. An
+        explicitly configured id always wins and skips this entirely.
+        """
+        if self.config.leadership_role_id is not None:
+            return self.config.leadership_role_id
+        name = self.config.leadership_role_name
+        if not name:
+            return None
+
+        wanted = name.strip().casefold()
+        matches = [r for r in roles if r.name.strip().casefold() == wanted]
+        if len(matches) == 1:
+            return matches[0].id
+        if not matches:
+            log.error(
+                "no role named %r on guild %s; write commands stay disabled",
+                name, self.config.guild_id,
+            )
+        else:
+            log.error(
+                "%d roles named %r on guild %s; refusing to guess, write "
+                "commands stay disabled. Set LEADERSHIP_ROLE_ID instead.",
+                len(matches), name, self.config.guild_id,
+            )
+        return None
+
+    async def _apply_leadership_role(self) -> None:
+        """Resolve the role name once the guild cache is populated.
+
+        Runs in on_ready rather than setup_hook: the guild is not available
+        until the client has connected.
+        """
+        if self.config.leadership_role_id is not None:
+            return
+        guild = self.get_guild(self.config.guild_id)
+        if guild is None:
+            log.error(
+                "not a member of guild %s; cannot resolve the leadership role",
+                self.config.guild_id,
+            )
+            return
+        resolved = self.resolve_leadership_role(guild.roles)
+        if resolved is not None:
+            self.config = dataclasses.replace(
+                self.config, leadership_role_id=resolved
+            )
+            log.info(
+                "leadership role %r resolved to id %s -- set LEADERSHIP_ROLE_ID "
+                "to that to skip this lookup",
+                self.config.leadership_role_name, resolved,
+            )
+
     async def on_ready(self) -> None:
+        await self._apply_leadership_role()
         log.info(
             "connected as %s | %s | %d members loaded",
             self.user, self.config.describe_posture(), len(self.directory.all()),

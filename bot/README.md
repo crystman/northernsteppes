@@ -151,6 +151,34 @@ counters behind the class ladders) are deliberately absent from the database
 while that system is reworked. When writes start flowing through Postgres this
 becomes a query and `MemberDirectory` loses its file path.
 
+## Identifying leadership
+
+Write commands are gated on a single Discord role, configured either way:
+
+| Variable | Behaviour |
+|---|---|
+| `LEADERSHIP_ROLE_ID` | Used directly. Stable across renames — prefer this. |
+| `LEADERSHIP_ROLE_NAME` | Resolved to an id at startup against the guild's roles. |
+
+The name is a convenience for when you cannot get the id (it needs Developer
+Mode and access to the server). It resolves only on an **unambiguous** match,
+compared case-insensitively:
+
+- exactly one role with that name — resolved, and the id is logged so it can be
+  pinned in `LEADERSHIP_ROLE_ID` later
+- no role with that name — write commands stay disabled
+- **several roles with that name** — write commands stay disabled
+
+That last case is the reason ids are preferred. Discord permits duplicate role
+names, and guessing between them is how write access ends up on the wrong role.
+Renaming the role also silently breaks a name lookup, where an id keeps working.
+
+Until the name resolves, the startup log says so:
+
+```
+write-commands=DISABLED (role 'Leadership' not resolved yet)
+```
+
 ## Layout
 
 ```

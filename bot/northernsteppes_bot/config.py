@@ -41,6 +41,7 @@ class Config:
     discord_token: str | None
     guild_id: int
     leadership_role_id: int | None
+    leadership_role_name: str | None
     database_url: str | None
     sync_enabled: bool
     dry_run: bool
@@ -52,6 +53,9 @@ class Config:
             discord_token=os.environ.get("DISCORD_TOKEN") or None,
             guild_id=_int_or_none("DISCORD_GUILD_ID") or DEFAULT_GUILD_ID,
             leadership_role_id=_int_or_none("LEADERSHIP_ROLE_ID"),
+            leadership_role_name=(
+                os.environ.get("LEADERSHIP_ROLE_NAME", "").strip() or None
+            ),
             database_url=os.environ.get("DATABASE_URL") or None,
             # Both default off: a fresh deployment reads but does not write
             # until someone deliberately turns writing on.
@@ -70,6 +74,10 @@ class Config:
         and the safe reading of "no role configured" is "nobody is
         leadership", not "everybody is".
 
+        A configured LEADERSHIP_ROLE_NAME does not by itself enable writes:
+        the name has to resolve to exactly one role on the guild first, which
+        happens at startup and replaces this config with the resolved id.
+
         Without a database there is nowhere for a write to go. Accepting the
         command and discarding it would be worse than refusing: leadership
         would believe dues were recorded when nothing was.
@@ -87,7 +95,11 @@ class Config:
         if self.write_commands_enabled:
             writes = "enabled"
         elif self.leadership_role_id is None:
-            writes = "DISABLED (no leadership role)"
+            writes = (
+                f"DISABLED (role {self.leadership_role_name!r} not resolved yet)"
+                if self.leadership_role_name
+                else "DISABLED (no leadership role)"
+            )
         else:
             writes = "DISABLED (no database)"
         bits = [

@@ -272,3 +272,68 @@ def test_gate_refuses_a_user_with_no_roles_at_all(write_bot, monkeypatch):
     import asyncio
     msg = asyncio.run(write_bot._require_leadership(FakeInteraction(FakeUser(None))))
     assert msg is not None
+
+
+# --- resolving the leadership role by name ---------------------------------
+
+class NamedRole:
+    def __init__(self, rid, name): self.id, self.name = rid, name
+
+
+def test_role_name_resolves_to_a_single_match(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "Leadership")
+    write_bot.config = Config.from_env()
+    roles = [NamedRole(1, "Member"), NamedRole(2, "Leadership"), NamedRole(3, "Bot")]
+    assert write_bot.resolve_leadership_role(roles) == 2
+
+
+def test_role_name_matching_ignores_case_and_padding(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "  leadership ")
+    write_bot.config = Config.from_env()
+    assert write_bot.resolve_leadership_role([NamedRole(7, "Leadership")]) == 7
+
+
+def test_duplicate_role_names_refuse_to_resolve(write_bot, monkeypatch):
+    """Discord permits duplicate role names. Guessing between them is how
+    write access lands on the wrong role."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "Leadership")
+    write_bot.config = Config.from_env()
+    roles = [NamedRole(2, "Leadership"), NamedRole(9, "leadership")]
+    assert write_bot.resolve_leadership_role(roles) is None
+
+
+def test_missing_role_name_does_not_resolve(write_bot, monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "Leadership")
+    write_bot.config = Config.from_env()
+    assert write_bot.resolve_leadership_role([NamedRole(1, "Member")]) is None
+
+
+def test_explicit_id_wins_over_the_name(write_bot, monkeypatch):
+    """An id is stable through renames, so it should never be second-guessed
+    by a name lookup."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "42")
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "Leadership")
+    write_bot.config = Config.from_env()
+    assert write_bot.resolve_leadership_role([NamedRole(2, "Leadership")]) == 42
+
+
+def test_no_name_and_no_id_resolves_to_nothing(write_bot):
+    assert write_bot.resolve_leadership_role([NamedRole(2, "Leadership")]) is None
+
+
+def test_a_name_alone_does_not_enable_writes(write_bot, monkeypatch):
+    """Until it resolves against a real guild, a name is just a string."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "Leadership")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    cfg = Config.from_env()
+    assert cfg.write_commands_enabled is False
+    assert "not resolved yet" in cfg.describe_posture()
+
+
+def test_writes_enable_once_the_name_resolves(write_bot, monkeypatch):
+    import dataclasses
+    monkeypatch.setenv("LEADERSHIP_ROLE_NAME", "Leadership")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    cfg = Config.from_env()
+    resolved = dataclasses.replace(cfg, leadership_role_id=2)
+    assert resolved.write_commands_enabled is True
