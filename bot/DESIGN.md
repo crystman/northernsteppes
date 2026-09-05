@@ -32,8 +32,9 @@ Discord  ──slash command──▶  Bot (Railway)  ──write──▶  Post
 
 **Postgres is the write buffer and query store.** Commands write here and
 return immediately, so `/rank` and `/roster` answer without a GitHub round
-trip. It also holds the data that would be miserable in git — attendance,
-RSVPs, and the award audit log, which are append-only and high-volume.
+trip. It was also intended to hold the append-only, high-volume data —
+attendance, RSVPs and an award audit log — though those tables are deferred
+for now; see the note under Schema.
 
 **Git stays the canonical record for member sheets.** The rendered
 `content/members/_<slug>.md` files remain what the site builds from, so the
@@ -64,8 +65,7 @@ create table members (
     display_name    text not null,          -- TOML `title`
     discord_user_id text unique,            -- null until linked
     member_since    date,
-    race            text,
-    unit            text,
+    units           text[] not null default '{}',  -- a member can be in several
     waiver          boolean not null default false,
     veteran_garb    boolean not null default false,
     archived        boolean not null default false,
@@ -73,60 +73,37 @@ create table members (
     updated_at      timestamptz not null default now()
 );
 
-create table dues (
+-- A row means "paid". There is no `paid` column because no member file has
+-- ever recorded a year as false, so a false row would have no meaning: dues
+-- are either recorded or they are not.
+create table dues_paid (
     member_id   uuid not null references members on delete cascade,
     year        int  not null,
-    paid        boolean not null default true,
-    recorded_by text not null,              -- discord user id
+    recorded_by text not null,              -- discord user id, or 'bootstrap'
     recorded_at timestamptz not null default now(),
     primary key (member_id, year)
 );
 
--- weapons, classes, professions and the class sub-counters share one table.
--- kind: 'weapon' | 'class' | 'profession' | 'counter' | 'flag'
---   'counter' covers Light_Armor / Armor (unbounded ints)
---   'flag'    covers Steal_10 / Steal_20 / Steal_30 / Look_Part (0 or 1)
+-- The set of proficiencies is fixed by content/proficiencies/ and effectively
+-- never changes, so it is constrained in the database rather than only in
+-- code. This is a seeded lookup table rather than an enum: a composite
+-- foreign key can enforce that a 'weapon' row carries a weapon name, which an
+-- enum cannot, and adding one later is an INSERT rather than an ALTER TYPE.
+create table proficiency_defs (
+    kind text not null check (
+             kind in ('weapon', 'class', 'profession', 'counter', 'flag')
+         ),
+    name text not null,
+    primary key (kind, name)
+);
+
 create table proficiencies (
     member_id uuid not null references members on delete cascade,
     kind      text not null,
-    name      text not null,                -- 'Sword & Board', 'Scout', 'Armorsmith'
-    level     int  not null default 0,
-    primary key (member_id, kind, name)
-);
-
--- append-only audit log; the reason awards belong in a real database
-create table awards (
-    id         bigserial primary key,
-    member_id  uuid not null references members on delete cascade,
-    kind       text not null,
-    name       text not null,
-    old_level  int,
-    new_level  int not null,
-    awarded_by text not null,
-    awarded_at timestamptz not null default now(),
-    note       text
-);
-
-create table practices (
-    id       bigserial primary key,
-    held_on  date not null,
-    location text,
-    unique (held_on, location)
-);
-
-create table attendance (
-    practice_id   bigint not null references practices on delete cascade,
-    member_id     uuid   not null references members on delete cascade,
-    checked_in_at timestamptz not null default now(),
-    primary key (practice_id, member_id)
-);
-
-create table event_rsvps (
-    event_slug   text not null,             -- matches content/events/<slug>
-    member_id    uuid not null references members on delete cascade,
-    response     text not null check (response in ('yes','no','maybe')),
-    responded_at timestamptz not null default now(),
-    primary key (event_slug, member_id)
+    name      text not null,
+    level     int  not null default 0 check (level >= 0),
+    primary key (member_id, kind, name),
+    foreign key (kind, name) references proficiency_defs (kind, name)
 );
 
 create table sync_state (
@@ -137,9 +114,23 @@ create table sync_state (
 );
 ```
 
-The `kind`/`name` pairs are validated in code against a static registry derived
-from `content/proficiencies/`, so a typo in a command cannot invent a
-proficiency the site templates do not render.
+`proficiency_defs` is seeded from `content/proficiencies/` in the same
+migration, so a typo in a command cannot invent a proficiency the site
+templates do not render -- the insert fails rather than silently creating a
+"Sword and Board" that never displays.
+
+**Deferred for now:** `awards`, `practices`, `attendance` and `event_rsvps`.
+Worth noting what that costs: those were the append-only, genuinely
+database-shaped tables. What remains is a mirror of data that already lives in
+git. The database still earns its place as the write buffer that makes the
+debounced sync possible, and as the query store behind instant `/rank` and
+`/roster` replies -- but if those four stay deferred indefinitely, reading the
+member files straight from GitHub would be a reasonable simplification.
+
+Dropping `awards` also means the record of *who* awarded a proficiency now
+lives only in the git commit that recorded it, rather than in a queryable
+table. For a club awarding ranks at monthly gatherings that is probably
+enough, and the commit trail is durable, but it is a real reduction.
 
 ## Sync
 
@@ -213,7 +204,7 @@ picker, it does not secure it.
 | Command | Effect |
 |---|---|
 | `/dues paid member: year:` | Records dues — fixes the empty-roster bug |
-| `/award member: kind: name: level:` | Sets a proficiency, writes an `awards` row |
+| `/award member: kind: name: level:` | Sets a proficiency |
 | `/waiver member: signed:` | Sets waiver status |
 | `/veteran-garb member: owns:` | Sets veteran garb |
 | `/member-add name: slug:` | Creates a member and their file |
@@ -229,11 +220,12 @@ Open to everyone:
 | `/roster [rank]` | Current members, grouped by rank |
 | `/me` | Your own sheet |
 | `/practice` | Next practice time and location |
-| `/checkin` | Records attendance |
-| `/rsvp event: response:` | Records an RSVP |
 
 `/gaps` is worth building early: the rank rules are precise enough to compute
 exactly what someone is missing, which today is a conversation with leadership.
+
+`/checkin` and `/rsvp` are dropped from this pass along with the tables they
+would write to.
 
 ## Identity
 
@@ -293,5 +285,12 @@ no-op. Write commands stay disabled until it has run.
    from leadership on what "current member" should mean.
 3. **Bot-created members** — should `/member-add` create a file, or should new
    members always be added by hand first?
-4. **Retention** — attendance and RSVP rows accumulate indefinitely. Fine at
-   this scale; worth deciding before it matters.
+4. **Retiring race.** Race is a dead premise in the group, so there is no
+   `race` column. But three member files still carry one (kaigar and magnus
+   "Dwarf", meatwolf "DwarfGiant") and `templates/member.html:11` still
+   renders it as "Race: Dwarf" on their pages. Once the sync job runs it will
+   drop the field from those files and the template branch will simply stop
+   matching -- which works, but retires the feature by erosion. Cleaner to
+   remove the template line and the three frontmatter entries deliberately, as
+   its own change. `unit` was genuinely unused by any template and is now
+   `units text[]`.
