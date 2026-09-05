@@ -64,6 +64,7 @@ class Config:
     github_token: str | None
     sync_repo: str | None
     sync_branch: str
+    api_port: int | None
     members_dir: str | None
     members_repo: str
     members_ref: str
@@ -87,6 +88,9 @@ class Config:
             github_token=os.environ.get("GITHUB_TOKEN", "").strip() or None,
             sync_repo=os.environ.get("SYNC_REPO", "").strip() or None,
             sync_branch=os.environ.get("SYNC_BRANCH", "").strip() or "main",
+            # Railway sets PORT for a service with a public domain. Without
+            # one the bot stays a private worker and serves nothing.
+            api_port=_int_or_none("PORT"),
             members_dir=os.environ.get("MEMBERS_DIR", "").strip() or None,
             members_repo=(
                 os.environ.get("MEMBERS_REPO", "").strip() or DEFAULT_MEMBERS_REPO

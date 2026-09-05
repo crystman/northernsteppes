@@ -1,0 +1,53 @@
+{#- Corrects the rendered page from the bot's read API.
+
+    The page is built from the committed member files and is complete without
+    this: crawlers and anyone with scripting disabled see exactly what they saw
+    before. This only updates the parts that go stale between commits, chiefly
+    dues, which change in Discord long before the sync commits them.
+
+    Silent on failure by design. A missing or slow API must leave the committed
+    content exactly as rendered rather than blanking or half-updating it. -#}
+{%- if config.extra.api_url %}
+<script>
+(function () {
+    var API = {{ config.extra.api_url | json_encode | safe }};
+    var nodes = document.querySelectorAll("[data-member-slug]");
+    if (!nodes.length) return;
+
+    var controller = new AbortController();
+    // The committed content is already correct enough; a slow API should not
+    // leave the page half-updated for long.
+    setTimeout(function () { controller.abort(); }, 4000);
+
+    fetch(API + "/api/members", { signal: controller.signal })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+            if (!data || !data.members) return;
+            var byslug = {};
+            data.members.forEach(function (m) { byslug[m.slug] = m; });
+
+            nodes.forEach(function (node) {
+                var member = byslug[node.getAttribute("data-member-slug")];
+                if (!member) return;
+
+                var rank = node.querySelector("[data-live='rank']");
+                if (rank && rank.textContent.trim() !== member.rank) {
+                    rank.textContent = member.rank;
+                    rank.setAttribute("data-updated", "true");
+                }
+
+                var dues = node.querySelector("[data-live='dues']");
+                if (dues) {
+                    dues.textContent = ({
+                        paid: "Dues paid for " + member.dues.year,
+                        behind: "Dues not up to date",
+                        never: "No dues recorded"
+                    })[member.dues.state] || "";
+                    dues.hidden = false;
+                }
+            });
+        })
+        .catch(function () { /* keep the committed content */ });
+})();
+</script>
+{%- endif %}

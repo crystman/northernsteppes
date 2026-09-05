@@ -51,6 +51,7 @@ class NorthernSteppesBot(discord.Client):
 
     async def setup_hook(self) -> None:
         await self._connect_store()
+        await self._start_api()
 
         # Reload off the request path. Autocomplete fires on every keystroke,
         # and a cache reload landing on one stalls it while 21 files are
@@ -95,6 +96,29 @@ class NorthernSteppesBot(discord.Client):
                 "will refuse"
             )
 
+    async def _start_api(self) -> None:
+        """Serve the read API, if a port is configured.
+
+        Failing to bind must not stop the bot: Discord commands are the
+        primary function, and the API only makes the website fresher.
+        """
+        if not self.config.api_port:
+            return
+        try:
+            from .api import build_app, start
+
+            async def sheets_provider():
+                base = self.directory.all()
+                if self.store is None:
+                    return base
+                return await self.store.overlay(base)
+
+            self._api_runner = await start(
+                build_app(sheets_provider, current_year), self.config.api_port
+            )
+        except Exception:
+            log.exception("read API failed to start; continuing without it")
+
     async def _refresh_members(self) -> None:
         """Keep the member cache warm, forever."""
         while True:
@@ -114,6 +138,9 @@ class NorthernSteppesBot(discord.Client):
         task = getattr(self, "_refresher", None)
         if task is not None:
             task.cancel()
+        runner = getattr(self, "_api_runner", None)
+        if runner is not None:
+            await runner.cleanup()
         await super().close()
 
     def resolve_leadership_role(self, roles) -> int | None:

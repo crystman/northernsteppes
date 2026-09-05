@@ -26,8 +26,12 @@
 
 {% set rank = ranks::rank(extra=page.extra) | trim | int %}
 
-<dl>
-    <dt><a href="{{ get_url(path="proficiencies/#ranks") }}">Rank</a></dt><dd>{{ rank_names[rank] }}</dd>
+{#- data-member-slug marks the region the live-status script may correct.
+    The values below are the committed ones and render on their own; the
+    script only replaces them when the API says something different. -#}
+<dl data-member-slug="{{ page.slug }}">
+    <dt><a href="{{ get_url(path="proficiencies/#ranks") }}">Rank</a></dt><dd data-live="rank">{{ rank_names[rank] }}</dd>
+    <dt hidden data-live-label>Dues</dt><dd hidden data-live="dues"></dd>
 </dl>
 
 {% set name = ["-", "Proficient", "Adept", "Master"] %}
@@ -72,4 +76,5 @@
     </p>
     </div>
 </article>
+{% include "partials/live_status.html" %}
 {% endblock content %}

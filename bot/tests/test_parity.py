@@ -37,14 +37,17 @@ MEMBERS_DIR = REPO_ROOT / "content" / "members"
 
 #: <dt><a href=".../proficiencies/#ranks">Rank</a></dt><dd>Harbinger</dd>
 _RANK_CELL = re.compile(
-    r'proficiencies/#ranks.*?</a></dt>\s*<dd>(.*?)</dd>', re.S
+    r'proficiencies/#ranks.*?</a></dt>\s*<dd[^>]*>(.*?)</dd>', re.S
 )
 
 
 def _definition(html: str, anchor: str) -> str | None:
     """Pull the <dd> that follows the <dt> linking to ``anchor``."""
+    # <dd[^>]*> rather than <dd>: the member template carries data-live
+    # attributes for the live-status script, and this test is about the
+    # rendered value, not the markup around it.
     match = re.search(
-        re.escape(anchor) + r'".*?</a></dt>\s*<dd>(.*?)</dd>', html, re.S
+        re.escape(anchor) + r'".*?</a></dt>\s*<dd[^>]*>(.*?)</dd>', html, re.S
     )
     return re.sub(r"\s+", " ", match.group(1)).strip() if match else None
 
