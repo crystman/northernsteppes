@@ -10,7 +10,9 @@
 {%- if config.extra.api_url %}
 <script>
 (function () {
-    var API = {{ config.extra.api_url | json_encode | safe }};
+    // Trailing slash tolerated: a base URL pasted from a browser bar
+    // usually has one, and "…app//api/members" would 404.
+    var API = {{ config.extra.api_url | json_encode | safe }}.replace(/\/+$/, "");
     var nodes = document.querySelectorAll("[data-member-slug]");
     if (!nodes.length) return;
 

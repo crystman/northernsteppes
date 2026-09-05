@@ -19,7 +19,7 @@ build_search_index = false
 # rank and dues from it in the browser, so a change recorded in Discord shows
 # before the sync has committed it. Unset means the pages stay exactly as
 # built -- the site never depends on the API being up.
-# api_url = "https://<service>.up.railway.app"
+api_url = "https://skillful-quietude-test.up.railway.app"
 full_title = "Northern Steppes - Foam Fighting in Fort Wayne, Indiana"
 image = "social.webp"
 google = "battle_small.webp"
