@@ -94,3 +94,50 @@
 {% endif %}
 {{ names[i] }}
 {% endmacro %}
+{# Derives a member's overall rank from their frontmatter, per the rules in
+   content/proficiencies/index.md#ranks. Outputs 0-3, an index into
+   ["Unranked", "Peasant", "Savage", "Harbinger"].
+
+   Callers cast the output back to a number:
+       {% set rank = ranks::rank(extra=page.extra) | trim | int %}
+
+   The scout/soldier/thief macros below take that value as their `rank`
+   argument, since the class ladders gate on it. #}
+{% macro rank(extra) %}
+{%- set_global r = 0 -%}
+{# Peasant: waiver on file #}
+{%- if extra.Waiver -%}
+    {%- set_global r = 1 -%}
+    {%- if extra.Dues -%}
+        {# Savage: dues paid, plus all four basic combat styles... #}
+        {%- if extra.weapons['Single Sword'] > 0 and extra.weapons['Sword & Board'] > 0 and extra.weapons.Rock > 0 and extra.weapons.Javelin > 0 -%}
+            {%- set_global r = 2 -%}
+            {# Harbinger: veteran garb, plus a second-rank profession... #}
+            {%- if extra.Veteran_Garb -%}
+                {%- for prof, value in extra.professions -%}
+                    {%- if value >= 2 -%}
+                        {%- set_global r = 3 -%}
+                    {%- endif -%}
+                {%- endfor -%}
+                {# ...or proficiency in every combat style #}
+                {%- if r != 3 -%}
+                    {%- set_global r = 3 -%}
+                    {%- for weapon, value in extra.weapons -%}
+                        {%- if value == 0 -%}
+                            {%- set_global r = 2 -%}
+                        {%- endif -%}
+                    {%- endfor -%}
+                {%- endif -%}
+            {%- endif -%}
+        {# ...or one proficient non-combat profession instead of the styles #}
+        {%- else -%}
+            {%- for prof, value in extra.professions -%}
+                {%- if value >= 1 -%}
+                    {%- set_global r = 2 -%}
+                {%- endif -%}
+            {%- endfor -%}
+        {%- endif -%}
+    {%- endif -%}
+{%- endif -%}
+{{ r }}
+{%- endmacro %}
