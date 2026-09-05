@@ -75,8 +75,18 @@ class NorthernSteppesBot(discord.Client):
             return
         try:
             from . import db
+            from .importer import bootstrap_sheets
+
             pool = await db.connect(self.config.database_url)
             await db.apply_migrations(pool)
+
+            # Import on every boot. It is idempotent, and without it a fresh
+            # database has a schema but no members -- every write would fail
+            # looking one up, while reads carried on working from the files
+            # and made the bot look healthy.
+            result = await bootstrap_sheets(pool, self.directory.all())
+            log.info("member import: %s", result.summary())
+
             self.store = MemberStore(pool)
             log.info("database connected")
         except Exception:
@@ -385,8 +395,14 @@ def build_write_tree(bot: "NorthernSteppesBot") -> None:
                 sheet.slug, year, str(interaction.user.id)
             )
         except UnknownMember:
+            # The name resolved against the files, so this is not a typo --
+            # the database is missing a row for a member who plainly exists.
+            log.warning("no database row for %s", sheet.slug)
             return await interaction.response.send_message(
-                views.format_no_match(member), ephemeral=True
+                views.format_member_not_in_database(
+                    sheet.display_name or sheet.slug
+                ),
+                ephemeral=True,
             )
         bot.directory.load()
         await interaction.response.send_message(

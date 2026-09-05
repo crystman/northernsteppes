@@ -377,3 +377,45 @@ async def test_link_survives_other_writes(store):
     await store.record_dues("lamp", 2026, ACTOR)
     await store.set_flag("lamp", "veteran_garb", False, ACTOR)
     assert await store.slug_for_discord(4242) == "lamp"
+
+
+# --- the bug: a schema with no members -------------------------------------
+
+@requires_db
+async def test_writes_fail_clearly_when_the_database_is_empty(store):
+    """The deployment bug: migrations had run but the import had not, so every
+    write failed looking up a member who was plainly on the roster."""
+    from northernsteppes_bot.store import UnknownMember
+
+    async with store.pool.acquire() as conn:
+        await conn.execute("delete from members")
+
+    with pytest.raises(UnknownMember):
+        await store.record_dues("lamp", 2026, ACTOR)
+
+
+@requires_db
+async def test_bootstrap_from_sheets_populates_an_empty_database(store):
+    """The fix: the bot imports what it loaded, whatever the source, so a host
+    with no members directory can still seed itself."""
+    from northernsteppes_bot.importer import bootstrap_sheets
+
+    async with store.pool.acquire() as conn:
+        await conn.execute("delete from members")
+
+    sheets = load_all(MEMBERS_DIR)
+    result = await bootstrap_sheets(store.pool, sheets)
+    assert result.members_inserted == len(sheets)
+
+    assert await store.record_dues("lamp", 2026, ACTOR) is True
+
+
+@requires_db
+async def test_bootstrap_from_sheets_is_idempotent(store):
+    """It runs on every boot."""
+    from northernsteppes_bot.importer import bootstrap_sheets
+
+    sheets = load_all(MEMBERS_DIR)
+    again = await bootstrap_sheets(store.pool, sheets)
+    assert again.members_inserted == 0
+    assert again.members_updated == len(sheets)

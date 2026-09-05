@@ -104,8 +104,18 @@ async def import_member(conn: asyncpg.Connection, sheet: MemberSheet) -> str:
 
 
 async def bootstrap(pool: asyncpg.Pool, members_dir: Path) -> ImportResult:
-    """Import every member file. Idempotent."""
-    sheets = load_all(members_dir)
+    """Import every member file from a directory. Idempotent."""
+    return await bootstrap_sheets(pool, load_all(members_dir))
+
+
+async def bootstrap_sheets(pool: asyncpg.Pool,
+                           sheets: list[MemberSheet]) -> ImportResult:
+    """Import already-parsed sheets. Idempotent.
+
+    Split from bootstrap so the bot can import what it loaded, whatever the
+    source. On a host that builds only bot/ there is no members directory to
+    point at, and the sheets came over the network.
+    """
     result = ImportResult()
 
     async with pool.acquire() as conn:

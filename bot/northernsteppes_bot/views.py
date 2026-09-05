@@ -241,6 +241,21 @@ def format_not_leadership() -> str:
     return "🔒 Only leadership can use that command."
 
 
+def format_member_not_in_database(name: str) -> str:
+    """The member exists in the files but has no database row.
+
+    Distinct from "no member matches": that one means the name was wrong,
+    this one means the name was right and the database is behind. Reporting
+    the first for the second sent somebody hunting for a typo that was not
+    there.
+    """
+    return (
+        f"⚠️ **{name}** is on the roster but has no record in the database "
+        "yet, so there is nothing to update. This usually clears itself on "
+        "the next restart; if it does not, tell whoever runs the bot."
+    )
+
+
 def format_dues_recorded(name: str, year: int, already: bool) -> str:
     if already:
         return f"ℹ️ {name} already had {year} dues recorded — nothing changed."
