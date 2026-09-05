@@ -25,7 +25,7 @@
     
         let googleCalLink = new URL("https://calendar.google.com/calendar/r/eventedit");
         googleCalLink.searchParams.append("text", "Belegarth Practice");
-        googleCalLink.searchParams.append("details", "https://thenorthernsteppes.org");
+        googleCalLink.searchParams.append("details", "{{ config.base_url | safe }}");
         googleCalLink.searchParams.append("dates", startDate.toISOString().replace(/[^\w\s]/gi, '') + "/" + endDate.toISOString().replace(/[^\w\s]/gi, ''));
         googleCalLink.searchParams.append("location", "{{ practice.location_coords }}");
         googleCalLink.searchParams.append("recur", "RRULE:FREQ=WEEKLY");
