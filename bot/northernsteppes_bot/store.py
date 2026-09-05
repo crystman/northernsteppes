@@ -17,6 +17,8 @@ files are behind.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import replace
 
 import asyncpg
@@ -37,6 +39,18 @@ class StoreError(RuntimeError):
 class UnknownMember(StoreError):
     def __init__(self, slug: str) -> None:
         super().__init__(f"no member with slug {slug!r}")
+        self.slug = slug
+
+
+class DuplicateMember(StoreError):
+    def __init__(self, slug: str) -> None:
+        super().__init__(f"a member with slug {slug!r} already exists")
+        self.slug = slug
+
+
+class InvalidSlug(StoreError):
+    def __init__(self, slug: str) -> None:
+        super().__init__(f"{slug!r} is not a usable slug")
         self.slug = slug
 
 
@@ -87,7 +101,9 @@ class MemberStore:
                 weapons.setdefault(r["slug"], {})[r["name"]] = r["level"]
 
         merged = []
+        seen = set()
         for sheet in sheets:
+            seen.add(sheet.slug)
             row = members.get(sheet.slug)
             if row is None:
                 merged.append(sheet)
@@ -102,7 +118,24 @@ class MemberStore:
                 # Professions and classes deliberately keep their file values.
                 weapons=weapons.get(sheet.slug) or sheet.weapons,
             ))
-        return merged
+
+        # Members added through the bot have no file yet -- the sync job
+        # creates it. Without this they would exist in the database and be
+        # invisible to every command, which is a confusing way for
+        # /member-add to appear to do nothing.
+        for slug, row in members.items():
+            if slug in seen:
+                continue
+            merged.append(MemberSheet(
+                slug=slug,
+                display_name=row["display_name"],
+                waiver=row["waiver"],
+                veteran_garb=row["veteran_garb"],
+                units=list(row["units"] or []),
+                dues_years=dues.get(slug, {}),
+                weapons=weapons.get(slug, {}),
+            ))
+        return sorted(merged, key=lambda s: s.slug)
 
     async def slug_for_discord(self, discord_user_id: int) -> str | None:
         async with self.pool.acquire() as conn:
@@ -226,3 +259,68 @@ class MemberStore:
                     " order by name", kind,
                 )
             ]
+
+
+#: Slugs become file names (content/members/_<slug>.md) and URL segments, so
+#: they are restricted to what is safe in both.
+_SLUG_OK = re.compile(r"\A[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+
+
+def slugify(name: str) -> str:
+    """Derive a slug from a display name, matching the existing files.
+
+    Accents are folded rather than replaced, so a name like "Quelen
+    Guardabosque" written with an accent still slugifies to `quelen-...` --
+    the convention the existing files use. Without this it would become
+    `quel-n-...` and produce a mangled file name and URL.
+    """
+    folded = unicodedata.normalize("NFKD", name.strip().lower())
+    folded = folded.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+
+
+async def _create(conn, slug: str, display_name: str):
+    return await conn.fetchval(
+        "insert into members (slug, display_name) values ($1, $2)"
+        " returning id",
+        slug, display_name,
+    )
+
+
+async def create_member(store: "MemberStore", display_name: str,
+                        slug: str | None, actor: str) -> str:
+    """Create a member record. Returns the slug used.
+
+    Only the database row: the file is written by the sync job, which is the
+    only thing that may add to the repository.
+    """
+    slug = (slug or slugify(display_name)).strip().lower()
+    if not _SLUG_OK.match(slug):
+        raise InvalidSlug(slug)
+
+    async with store.pool.acquire() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchval(
+                "select slug from members where slug = $1", slug
+            )
+            if existing:
+                raise DuplicateMember(slug)
+            await _create(conn, slug, display_name.strip())
+            await store._mark_dirty(conn)
+    return slug
+
+
+async def sync_status(store: "MemberStore") -> dict:
+    """What the sync job would have to do, if it existed."""
+    async with store.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "select dirty_since, last_synced_at, last_commit_sha"
+            "  from sync_state where id = 1"
+        )
+        members = await conn.fetchval("select count(*) from members")
+    return {
+        "dirty_since": row["dirty_since"] if row else None,
+        "last_synced_at": row["last_synced_at"] if row else None,
+        "last_commit_sha": row["last_commit_sha"] if row else None,
+        "members": members,
+    }

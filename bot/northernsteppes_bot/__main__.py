@@ -11,7 +11,12 @@ import logging
 import sys
 from pathlib import Path
 
-from .bot import NorthernSteppesBot, build_tree, build_write_tree
+from .bot import (
+    NorthernSteppesBot,
+    build_admin_tree,
+    build_tree,
+    build_write_tree,
+)
 from .config import Config
 from .roster import MemberDirectory
 
@@ -83,6 +88,7 @@ def main() -> int:
     bot = NorthernSteppesBot(config, directory)
     build_tree(bot)
     build_write_tree(bot)
+    build_admin_tree(bot)
     bot.run(config.discord_token, log_handler=None)
     return 0
 

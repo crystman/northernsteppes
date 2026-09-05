@@ -261,3 +261,92 @@ async def test_award_command_path_changes_one_line(store):
     assert any('Units = ["CoWS"]' in line for line in changed), (
         "unit must survive the round trip through the database"
     )
+
+
+# --- creating members ------------------------------------------------------
+
+@requires_db
+async def test_creating_a_member_makes_them_visible(store):
+    """A member created only in the database must still appear in commands,
+    or /member-add looks like it did nothing until the sync runs."""
+    from northernsteppes_bot.store import create_member
+
+    slug = await create_member(store, "Test Newcomer", None, ACTOR)
+    assert slug == "test-newcomer"
+
+    merged = {s.slug: s for s in await store.overlay(load_all(MEMBERS_DIR))}
+    assert "test-newcomer" in merged
+    assert merged["test-newcomer"].display_name == "Test Newcomer"
+
+
+@requires_db
+async def test_created_members_start_unranked(store):
+    from northernsteppes_bot.ranks import rank_name
+    from northernsteppes_bot.store import create_member
+
+    await create_member(store, "Test Newcomer", None, ACTOR)
+    merged = {s.slug: s for s in await store.overlay(load_all(MEMBERS_DIR))}
+    assert rank_name(merged["test-newcomer"]) == "Unranked"
+
+
+@requires_db
+async def test_duplicate_slug_is_rejected(store):
+    from northernsteppes_bot.store import DuplicateMember, create_member
+
+    with pytest.raises(DuplicateMember):
+        await create_member(store, "Lamp Again", "lamp", ACTOR)
+
+
+@requires_db
+async def test_invalid_slug_is_rejected(store):
+    """Slugs become file names and URLs."""
+    from northernsteppes_bot.store import InvalidSlug, create_member
+
+    for bad in ["../escape", "Has Spaces", "trailing-", "sym$bol", "-"]:
+        with pytest.raises(InvalidSlug):
+            await create_member(store, "X", bad, ACTOR)
+
+
+@requires_db
+async def test_an_empty_slug_falls_back_to_the_name(store):
+    """Discord sends "" for an omitted optional string, which has to mean
+    "derive it" rather than being an error."""
+    from northernsteppes_bot.store import create_member
+
+    assert await create_member(store, "Test Newcomer", "", ACTOR) == "test-newcomer"
+
+
+@requires_db
+async def test_an_explicit_slug_is_lowercased_rather_than_refused(store):
+    """Case is normalised, not rejected: the file convention is lowercase and
+    correcting it is friendlier than an error."""
+    from northernsteppes_bot.store import create_member
+
+    assert await create_member(store, "Test Newcomer", "Newcomer", ACTOR) == "newcomer"
+
+
+@requires_db
+async def test_creating_a_member_marks_the_sync_dirty(store):
+    from northernsteppes_bot.store import create_member
+
+    async with store.pool.acquire() as conn:
+        await conn.execute("update sync_state set dirty_since = null")
+    await create_member(store, "Test Newcomer", None, ACTOR)
+    async with store.pool.acquire() as conn:
+        assert await conn.fetchval("select dirty_since from sync_state") is not None
+
+
+# --- sync status -----------------------------------------------------------
+
+@requires_db
+async def test_sync_status_reports_clean_then_dirty(store):
+    from northernsteppes_bot.store import sync_status
+
+    async with store.pool.acquire() as conn:
+        await conn.execute("update sync_state set dirty_since = null")
+    assert (await sync_status(store))["dirty_since"] is None
+
+    await store.record_dues("lamp", 2026, ACTOR)
+    status = await sync_status(store)
+    assert status["dirty_since"] is not None
+    assert status["members"] == len(load_all(MEMBERS_DIR))

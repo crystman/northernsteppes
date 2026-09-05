@@ -258,3 +258,52 @@ def format_linked(name: str, mention: str, taken_from: str | None) -> str:
 def format_unknown_proficiency(name: str, known: list[str]) -> str:
     listing = ", ".join(f"`{k}`" for k in known)
     return f"❌ **{name}** is not a known weapon style. Known: {listing}"
+
+
+def format_member_added(display_name: str, slug: str) -> str:
+    return (
+        f"✅ Added **{display_name}** as `{slug}`.\n"
+        "Their page appears on the website once the sync runs."
+    )
+
+
+def format_duplicate_member(slug: str) -> str:
+    return (
+        f"❌ A member with slug `{slug}` already exists. "
+        "Pass a different `slug` if this is a different person."
+    )
+
+
+def format_invalid_slug(slug: str) -> str:
+    return (
+        f"❌ `{slug}` is not a usable slug. Slugs become file names and URLs, "
+        "so they must be lowercase letters and digits separated by dashes."
+    )
+
+
+def format_sync_status(status: dict, may_write: bool) -> str:
+    """What the sync would do. Honest that it cannot run yet."""
+    lines = ["**Sync status**", f"Members tracked: {status['members']}"]
+
+    if status["dirty_since"]:
+        lines.append(
+            f"⚠️ Unsynced changes since {status['dirty_since']:%Y-%m-%d %H:%M} UTC"
+        )
+    else:
+        lines.append("✅ No changes waiting")
+
+    if status["last_synced_at"]:
+        lines.append(
+            f"Last synced: {status['last_synced_at']:%Y-%m-%d %H:%M} UTC"
+            + (f" (`{status['last_commit_sha'][:8]}`)"
+               if status["last_commit_sha"] else "")
+        )
+    else:
+        lines.append("Last synced: never")
+
+    if not may_write:
+        lines.append(
+            "\nℹ️ The sync job is not configured, so changes stay in the "
+            "database and do not reach the website yet."
+        )
+    return truncate("\n".join(lines))

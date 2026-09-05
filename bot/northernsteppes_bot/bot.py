@@ -23,6 +23,7 @@ from discord import app_commands
 from .config import Config, is_leadership
 from .ranks import LEVEL_NAMES
 from .roster import MemberDirectory
+from . import store as store_mod
 from .store import MemberStore, UnknownMember, UnknownProficiency
 from . import views
 
@@ -413,4 +414,49 @@ def build_write_tree(bot: "NorthernSteppesBot") -> None:
             views.format_linked(
                 sheet.display_name or sheet.slug, account.mention, taken_from
             )
+        )
+
+
+def build_admin_tree(bot: "NorthernSteppesBot") -> None:
+    """Commands that manage records rather than edit them."""
+    tree = bot.tree
+
+    @tree.command(name="member-add", description="Create a new member record")
+    @app_commands.describe(
+        name="Display name, as it should appear on the site",
+        slug="Optional. Defaults to a slug derived from the name.",
+    )
+    async def member_add_cmd(interaction: discord.Interaction, name: str,
+                             slug: str | None = None):
+        denied = await bot._require_leadership(interaction)
+        if denied:
+            return await interaction.response.send_message(denied, ephemeral=True)
+        try:
+            created = await store_mod.create_member(
+                bot.store, name, slug, str(interaction.user.id)
+            )
+        except store_mod.DuplicateMember as exc:
+            return await interaction.response.send_message(
+                views.format_duplicate_member(exc.slug), ephemeral=True
+            )
+        except store_mod.InvalidSlug as exc:
+            return await interaction.response.send_message(
+                views.format_invalid_slug(exc.slug), ephemeral=True
+            )
+        await interaction.response.send_message(
+            views.format_member_added(name.strip(), created)
+        )
+
+    @tree.command(name="sync-status",
+                  description="Show what is waiting to reach the website")
+    async def sync_status_cmd(interaction: discord.Interaction):
+        # Readable by anyone: it exposes no member data, and "did my dues
+        # actually go through" is a fair question for the person who paid.
+        if bot.store is None:
+            return await interaction.response.send_message(
+                views.format_writes_disabled(bot.config), ephemeral=True
+            )
+        status = await store_mod.sync_status(bot.store)
+        await interaction.response.send_message(
+            views.format_sync_status(status, may_write=bot.config.may_write_to_git)
         )
