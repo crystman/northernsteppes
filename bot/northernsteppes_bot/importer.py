@@ -61,16 +61,18 @@ async def import_member(conn: asyncpg.Connection, sheet: MemberSheet) -> str:
     """Upsert one member and their child rows. Returns 'inserted' or 'updated'."""
     row = await conn.fetchrow(
         """
-        insert into members (slug, display_name, waiver, veteran_garb)
-             values ($1, $2, $3, $4)
+        insert into members (slug, display_name, waiver, veteran_garb, units)
+             values ($1, $2, $3, $4, $5)
         on conflict (slug) do update set
                 display_name = excluded.display_name,
                 waiver       = excluded.waiver,
                 veteran_garb = excluded.veteran_garb,
+                units        = excluded.units,
                 updated_at   = now()
           returning id, (xmax = 0) as inserted
         """,
         sheet.slug, sheet.display_name, sheet.waiver, sheet.veteran_garb,
+        sheet.units,
     )
     member_id = row["id"]
 
