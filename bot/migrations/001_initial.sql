@@ -10,8 +10,11 @@ create table if not exists members (
     display_name    text not null,          -- TOML `title`
     discord_user_id text unique,            -- null until linked
     member_since    date,
-    race            text,
-    unit            text,
+    -- No `race` column: the concept is retired in the group. Three member
+    -- files still carry one and templates/member.html still renders it, so
+    -- retiring those is a separate change -- see DESIGN.md.
+    -- Plural: a member can belong to more than one unit.
+    units           text[] not null default '{}',
     waiver          boolean not null default false,
     veteran_garb    boolean not null default false,
     archived        boolean not null default false,
@@ -19,67 +22,41 @@ create table if not exists members (
     updated_at      timestamptz not null default now()
 );
 
-create table if not exists dues (
+-- A row means "paid". There is deliberately no `paid` column: no member file
+-- has ever recorded a year as false, so a false row would have no meaning.
+-- Dues are either recorded or they are not.
+create table if not exists dues_paid (
     member_id   uuid not null references members on delete cascade,
     year        int  not null,
-    paid        boolean not null default true,
     recorded_by text not null,              -- discord user id, or 'bootstrap'
     recorded_at timestamptz not null default now(),
     primary key (member_id, year)
 );
 
--- Weapons, classes, professions and the class sub-counters share one table.
---   'weapon'     0-3 proficiency level
---   'class'      0-3 proficiency level
---   'profession' 0-3 proficiency level
---   'counter'    Light_Armor / Armor, unbounded ints
---   'flag'       Steal_10 / Steal_20 / Steal_30 / Look_Part, 0 or 1
+-- The set of proficiencies is fixed by content/proficiencies/ and effectively
+-- never changes, so it is constrained in the database rather than only in code.
+--
+-- A seeded lookup table rather than an enum: the composite foreign key below
+-- enforces that a 'weapon' row carries a weapon name, which an enum cannot,
+-- and adding a proficiency later is an INSERT rather than an ALTER TYPE.
+--   'weapon' | 'class' | 'profession'  0-3 proficiency levels
+--   'counter'                          Light_Armor / Armor, unbounded ints
+--   'flag'                             Steal_* / Look_Part, 0 or 1
+create table if not exists proficiency_defs (
+    kind text not null check (
+             kind in ('weapon', 'class', 'profession', 'counter', 'flag')
+         ),
+    name text not null,
+    primary key (kind, name)
+);
+
 create table if not exists proficiencies (
     member_id uuid not null references members on delete cascade,
-    kind      text not null check (
-                  kind in ('weapon', 'class', 'profession', 'counter', 'flag')
-              ),
+    kind      text not null,
     name      text not null,
     level     int  not null default 0 check (level >= 0),
-    primary key (member_id, kind, name)
-);
-
--- Append-only audit log. This is the reason awards belong in a database:
--- git records that a value changed, this records who changed it and why.
-create table if not exists awards (
-    id         bigserial primary key,
-    member_id  uuid not null references members on delete cascade,
-    kind       text not null,
-    name       text not null,
-    old_level  int,
-    new_level  int not null,
-    awarded_by text not null,
-    awarded_at timestamptz not null default now(),
-    note       text
-);
-
-create index if not exists awards_member_idx on awards (member_id, awarded_at desc);
-
-create table if not exists practices (
-    id       bigserial primary key,
-    held_on  date not null,
-    location text,
-    unique (held_on, location)
-);
-
-create table if not exists attendance (
-    practice_id   bigint not null references practices on delete cascade,
-    member_id     uuid   not null references members on delete cascade,
-    checked_in_at timestamptz not null default now(),
-    primary key (practice_id, member_id)
-);
-
-create table if not exists event_rsvps (
-    event_slug   text not null,             -- matches content/events/<slug>
-    member_id    uuid not null references members on delete cascade,
-    response     text not null check (response in ('yes', 'no', 'maybe')),
-    responded_at timestamptz not null default now(),
-    primary key (event_slug, member_id)
+    primary key (member_id, kind, name),
+    foreign key (kind, name) references proficiency_defs (kind, name)
 );
 
 -- Single-row table tracking whether the rendered member files are behind the
@@ -92,3 +69,64 @@ create table if not exists sync_state (
 );
 
 insert into sync_state (id) values (1) on conflict (id) do nothing;
+
+-- Seed the permitted proficiencies, mirroring content/proficiencies/ and the
+-- [extra.*] tables in content/members/_*.md.
+insert into proficiency_defs (kind, name) values
+    ('weapon', 'Single Sword'),
+    ('weapon', 'Sword & Board'),
+    ('weapon', 'Dual Wield'),
+    ('weapon', '2 Handed Weapon'),
+    ('weapon', 'Flail'),
+    ('weapon', 'Dagger'),
+    ('weapon', 'Polearm'),
+    ('weapon', 'Spear'),
+    ('weapon', 'Rock'),
+    ('weapon', 'Javelin'),
+    ('weapon', 'Archery'),
+
+    ('class', 'Scout'),
+    ('class', 'Archer'),
+    ('class', 'Ranger'),
+    ('class', 'Vanguard'),
+    ('class', 'Soldier'),
+    ('class', 'Berserker'),
+    ('class', 'Paladin'),
+    ('class', 'Shaman'),
+    ('class', 'Shieldman'),
+    ('class', 'Spearman'),
+    ('class', 'Thief'),
+    ('class', 'Assassin'),
+    ('class', 'Rogue'),
+    ('class', 'Swashbuckler'),
+
+    ('counter', 'Light_Armor'),
+    ('counter', 'Armor'),
+
+    ('flag', 'Steal_10'),
+    ('flag', 'Steal_20'),
+    ('flag', 'Steal_30'),
+    ('flag', 'Look_Part'),
+
+    ('profession', 'Armorsmith'),
+    ('profession', 'Entertainer'),
+    ('profession', 'Blacksmith'),
+    ('profession', 'Bookbinder'),
+    ('profession', 'Brewer'),
+    ('profession', 'Candlemaker'),
+    ('profession', 'Clothier'),
+    ('profession', 'Cook'),
+    ('profession', 'Fletcher'),
+    ('profession', 'Foamsmith'),
+    ('profession', 'Herald'),
+    ('profession', 'Herbalist'),
+    ('profession', 'Hunter'),
+    ('profession', 'Leatherworker'),
+    ('profession', 'Magistrate'),
+    ('profession', 'Medic'),
+    ('profession', 'Merchant'),
+    ('profession', 'Scribe'),
+    ('profession', 'Silversmith'),
+    ('profession', 'Weaponsmith'),
+    ('profession', 'Woodworker')
+on conflict (kind, name) do nothing;

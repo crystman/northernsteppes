@@ -4,10 +4,7 @@ Git is the source of truth for this first load. The files predate the bot, so
 the database is being populated *from* them, not the other way round.
 
 Re-running must be a no-op when nothing has changed, because this runs on
-every boot until the sync job exists and it must not manufacture spurious
-history. Rows are upserted by natural key, and the awards audit log is
-deliberately left untouched -- importing existing values is not an award, and
-recording it as one would fabricate a record of who granted what.
+every boot until the sync job exists. Rows are upserted by natural key.
 """
 
 from __future__ import annotations
@@ -20,8 +17,8 @@ import asyncpg
 from .members import CLASS_COUNTERS, CLASS_FLAGS, load_all
 from .ranks import MemberSheet
 
-#: Marker used in dues.recorded_by for rows that came from the files rather
-#: than from a Discord command, so imported data is distinguishable later.
+#: Marker used in dues_paid.recorded_by for rows that came from the files
+#: rather than from a Discord command, so imported data stays distinguishable.
 BOOTSTRAP_ACTOR = "bootstrap"
 
 
@@ -85,14 +82,18 @@ async def import_member(conn: asyncpg.Connection, sheet: MemberSheet) -> str:
     )
     member_id = row["id"]
 
+    # A row means "paid", so a year recorded as false contributes nothing.
+    # None currently are, but the files are hand-edited and could be.
     for year, paid in sorted(sheet.dues_years.items()):
+        if not paid:
+            continue
         await conn.execute(
             """
-            insert into dues (member_id, year, paid, recorded_by)
-                 values ($1, $2, $3, $4)
-            on conflict (member_id, year) do update set paid = excluded.paid
+            insert into dues_paid (member_id, year, recorded_by)
+                 values ($1, $2, $3)
+            on conflict (member_id, year) do nothing
             """,
-            member_id, year, paid, BOOTSTRAP_ACTOR,
+            member_id, year, BOOTSTRAP_ACTOR,
         )
 
     for kind, name, level in proficiency_rows(sheet):
@@ -123,7 +124,9 @@ async def bootstrap(pool: asyncpg.Pool, members_dir: Path) -> ImportResult:
                     result.members_inserted += 1
                 else:
                     result.members_updated += 1
-                result.dues_rows += len(sheet.dues_years)
+                result.dues_rows += sum(
+                    1 for paid in sheet.dues_years.values() if paid
+                )
                 result.proficiency_rows += len(proficiency_rows(sheet))
 
     return result

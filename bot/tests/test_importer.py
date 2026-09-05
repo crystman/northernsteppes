@@ -123,19 +123,10 @@ async def test_bootstrap_is_idempotent(pool):
 
 
 @requires_db
-async def test_bootstrap_writes_no_awards(pool):
-    """Importing an existing value is not an award. Recording it as one would
-    fabricate a record of who granted it."""
-    await bootstrap(pool, MEMBERS_DIR)
-    async with pool.acquire() as conn:
-        assert await conn.fetchval("select count(*) from awards") == 0
-
-
-@requires_db
 async def test_imported_dues_are_marked_as_bootstrap(pool):
     await bootstrap(pool, MEMBERS_DIR)
     async with pool.acquire() as conn:
-        actors = await conn.fetch("select distinct recorded_by from dues")
+        actors = await conn.fetch("select distinct recorded_by from dues_paid")
     assert [r["recorded_by"] for r in actors] == [BOOTSTRAP_ACTOR]
 
 
@@ -162,6 +153,45 @@ async def test_no_2026_dues_present(pool):
     await bootstrap(pool, MEMBERS_DIR)
     async with pool.acquire() as conn:
         paid_2026 = await conn.fetchval(
-            "select count(*) from dues where year = 2026 and paid"
+            "select count(*) from dues_paid where year = 2026"
         )
     assert paid_2026 == 0
+
+
+@requires_db
+async def test_unknown_proficiency_is_rejected(pool):
+    """The composite foreign key is the point of proficiency_defs: a typo in a
+    command must fail loudly rather than create a proficiency the site
+    templates will never render."""
+    await bootstrap(pool, MEMBERS_DIR)
+    async with pool.acquire() as conn:
+        member_id = await conn.fetchval("select id from members limit 1")
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                "insert into proficiencies (member_id, kind, name, level)"
+                " values ($1, 'weapon', 'Sword and Board', 2)",
+                member_id,
+            )
+
+
+@requires_db
+async def test_kind_and_name_must_agree(pool):
+    """A real proficiency name filed under the wrong kind is also rejected --
+    the thing an enum on `name` alone could not catch."""
+    await bootstrap(pool, MEMBERS_DIR)
+    async with pool.acquire() as conn:
+        member_id = await conn.fetchval("select id from members limit 1")
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                "insert into proficiencies (member_id, kind, name, level)"
+                " values ($1, 'profession', 'Flail', 1)",
+                member_id,
+            )
+
+
+@requires_db
+async def test_units_defaults_to_empty_array(pool):
+    await bootstrap(pool, MEMBERS_DIR)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("select units from members")
+    assert all(r["units"] == [] for r in rows)
