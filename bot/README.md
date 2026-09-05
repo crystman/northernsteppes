@@ -151,6 +151,53 @@ counters behind the class ladders) are deliberately absent from the database
 while that system is reworked. When writes start flowing through Postgres this
 becomes a query and `MemberDirectory` loses its file path.
 
+## Deploying to Railway
+
+Two services in one project: a Postgres, and this bot as a worker with no
+public domain or exposed port.
+
+Because `railway.json` and `requirements.txt` live in `bot/`, the service's
+**Root Directory must be `bot/`** -- that is a service setting rather than
+something config-as-code can express. Everything else is in `railway.json`:
+the start command, the `bot/**` watch patterns that stop a bylaws edit
+redeploying the bot, and an on-failure restart policy.
+
+Variables to set on the bot service:
+
+| Variable | Value |
+|---|---|
+| `DISCORD_TOKEN` | from the developer portal's Bot tab |
+| `DISCORD_GUILD_ID` | the guild to register commands in |
+| `LEADERSHIP_ROLE_NAME` | or `LEADERSHIP_ROLE_ID`, which is preferred |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` -- a reference, not a pasted literal, so it survives credential rotation |
+
+### What the logs should say
+
+```
+loaded settings from .../bot/.env      (local only; Railway uses variables)
+database connected
+leadership role 'Leadership' resolved to id 123456789
+commands synced to guild 1279582837749842092
+connected as NorthernSteppesBot | guild=... write-commands=enabled git-sync=off
+```
+
+A bad `DATABASE_URL` is deliberately not fatal:
+
+```
+database unavailable; continuing read-only, write commands will refuse
+```
+
+The bot keeps answering `/rank` and `/roster` from the member files, and write
+commands refuse rather than silently discarding a change. That is preferable to
+a crash loop, but it does mean **a working bot is not proof the database
+connected** -- check the log line.
+
+### Which branch
+
+The bot lives under `bot/` in this repository, so a Railway service tracking
+`main` only has it once these changes are merged. Until then, point the service
+at a fork and branch.
+
 ## Identifying leadership
 
 Write commands are gated on a single Discord role, configured either way:
