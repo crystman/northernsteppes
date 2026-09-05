@@ -10,6 +10,7 @@ Nothing here connects, logs in, or needs a token.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -78,3 +79,51 @@ def test_write_commands_disabled_without_a_role(bot):
 
 def test_current_year_is_sane():
     assert 2020 < current_year() < 2100
+
+
+# --- .env loading ----------------------------------------------------------
+
+def test_env_file_path_sits_next_to_the_example():
+    """bot/.env.example tells you to copy it to bot/.env; that has to be the
+    file the bot actually reads."""
+    from northernsteppes_bot.__main__ import ENV_FILE
+    assert ENV_FILE.name == ".env"
+    assert (ENV_FILE.parent / ".env.example").is_file()
+
+
+# tempfile rather than pytest's tmp_path, for the same reason as in
+# test_roster.py: tmp_path fails with a PermissionError when a stale
+# pytest-of-<user> directory is left behind, which has nothing to do with
+# what these check.
+
+def test_load_env_file_is_a_noop_when_absent(monkeypatch):
+    import northernsteppes_bot.__main__ as entry
+    with tempfile.TemporaryDirectory() as raw:
+        monkeypatch.setattr(entry, "ENV_FILE", Path(raw) / "nope.env")
+        assert entry.load_env_file() is False
+
+
+def test_env_file_does_not_override_real_environment(monkeypatch):
+    """Railway injects real variables. A stale .env on someone's machine must
+    never win over them."""
+    import northernsteppes_bot.__main__ as entry
+    with tempfile.TemporaryDirectory() as raw:
+        env = Path(raw) / ".env"
+        env.write_text("DISCORD_GUILD_ID=111\n", encoding="utf-8")
+        monkeypatch.setattr(entry, "ENV_FILE", env)
+        monkeypatch.setenv("DISCORD_GUILD_ID", "999")
+
+        assert entry.load_env_file() is True
+        assert Config.from_env().guild_id == 999
+
+
+def test_env_file_fills_in_what_the_environment_lacks(monkeypatch):
+    import northernsteppes_bot.__main__ as entry
+    with tempfile.TemporaryDirectory() as raw:
+        env = Path(raw) / ".env"
+        env.write_text("DISCORD_GUILD_ID=4242\n", encoding="utf-8")
+        monkeypatch.setattr(entry, "ENV_FILE", env)
+        monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
+
+        assert entry.load_env_file() is True
+        assert Config.from_env().guild_id == 4242

@@ -98,6 +98,44 @@ in Railway's logs while answering every question incorrectly.
 Commands are registered to the guild rather than globally, so they appear
 immediately instead of taking up to an hour to propagate.
 
+### Trying it in your own server
+
+The read-only commands need no database, no leadership role and no repo
+access, so they are safe to point at a scratch server.
+
+1. **Invite the bot.** In the Discord developer portal, under OAuth2 → URL
+   Generator, tick the `bot` and `applications.commands` scopes, then `Send
+   Messages` under bot permissions. Open the generated URL and pick your
+   server. Or build it by hand, substituting the Application ID from General
+   Information:
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&permissions=2048&scope=bot+applications.commands
+   ```
+
+   No privileged intents are needed, so nothing requires Discord's approval.
+
+2. **Point it at that server.** Commands register to one guild, and
+   `DISCORD_GUILD_ID` defaults to Northern Steppes. Set it to your test
+   server's ID or the bot will try to register commands in a guild it is not
+   in and fail with a permissions error. Enable Developer Mode in Discord,
+   then right-click the server icon → Copy Server ID.
+
+3. **Run it locally**, from a repo checkout so it can read `content/members`:
+
+   ```bash
+   cd bot
+   .venv/Scripts/python.exe -m northernsteppes_bot
+   ```
+
+Guild-scoped commands appear immediately, so `/rank`, `/gaps` and `/roster`
+are usable as soon as it logs in.
+
+`/me` will tell you it needs a member-to-Discord link. That is expected: the
+link is set by `/link`, a leadership-gated write command that does not exist
+yet. Matching on a Discord display name instead would risk showing one
+person's sheet to another.
+
 ### Where read commands get their data
 
 From the member files, not the database. Nothing writes to the database yet
