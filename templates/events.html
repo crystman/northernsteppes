@@ -11,7 +11,10 @@
     {% else %}
         {% set pages = section.pages %}
     {% endif %}
-    {% for page in pages %}
+    {# sort_by = "date" gives newest first, so reverse for soonest first: the
+       script below removes events whose date has passed, leaving the next
+       event at the top -- which is what "Upcoming Events" implies. #}
+    {% for page in pages | reverse %}
     <article class="post-entry" id="{{ page.slug }}">
       <header class="entry-header">
           <h2>{{ page.title }}</h2>
@@ -38,6 +41,25 @@
         }
     </script>
     {% endfor %}
+
+    {#- Every event above removes itself once its date has passed, so a
+        calendar with nothing upcoming leaves the page blank under its
+        heading, which reads as broken rather than as "nothing scheduled".
+        Hidden by default so it never flashes before the removals run, and
+        revealed only if none survived. -#}
+    <p id="no-upcoming-events" hidden>
+        No events are scheduled at the moment. Practices still run every week —
+        see <a href="{{ get_url(path="practice", trailing_slash=true) }}">practice times</a>,
+        and we announce new events as they are planned.
+    </p>
+    <script>
+        {#- Runs after the per-event scripts above: inline scripts execute in
+            document order as the page is parsed. -#}
+        if (!document.querySelector(".post-entry")) {
+            document.getElementById("no-upcoming-events").hidden = false;
+        }
+    </script>
+
     <footer class="post-footer">
         {% if section.taxonomies and section.taxonomies.tags %}
         <ul class="post-tags">
