@@ -208,6 +208,11 @@ deliberate act.
 
 ## Deploying to Railway
 
+**Going to production for the first time? Read [RELEASING.md](RELEASING.md)
+instead.** It covers the parts this section does not: which Discord
+application, the public domain the API needs, and the order to do things in so
+the website is not pointing at a bot that does not exist yet.
+
 Two services in one project: a Postgres, and this bot.
 
 Because `requirements.txt` lives in `bot/`, the service's **Root Directory
@@ -252,11 +257,21 @@ and stays connected rather than crash-looping — but it can answer nothing
 about members, because there is nothing else to read. **A bot that is online
 is not proof the database connected**: check the log line.
 
-### Which branch
+### How a deploy happens
 
-The bot lives under `bot/` in this repository, so a Railway service tracking
-`main` only has it once these changes are merged. Until then, point the service
-at a fork and branch.
+`.github/workflows/bot-deploy.yaml` runs `railway up` against production after
+the tests pass on main, using a `RAILWAY_TOKEN` repository secret. Railway's
+own GitHub integration is not working for this project, and deploying by hand
+means production updates only when a particular person opens a particular
+laptop.
+
+Without the secret the workflow is a no-op that says so, so it is harmless
+before the token exists. To deploy by hand anyway:
+
+```bash
+cd bot
+railway up --environment production
+```
 
 ## Identifying leadership
 

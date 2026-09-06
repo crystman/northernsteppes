@@ -1,0 +1,94 @@
+name: Deploy bot to Railway
+
+# Railway's own GitHub integration is not working for this project, and
+# deploying by hand means production only updates when a specific person opens
+# a specific laptop. This does it from CI instead: the deploy token lives in
+# this repository's secrets, so whoever administers the Railway account and
+# whoever merges to main do not have to be the same person.
+#
+# Runs only after "Bot tests" passes on main, so a commit that breaks the bot
+# cannot reach the service the website reads from.
+
+on:
+  workflow_run:
+    workflows: ["Bot tests"]
+    types: [completed]
+    branches: [main]
+  # For a redeploy that is not tied to a commit -- a changed variable, or
+  # recovering a service that was stopped.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a deploy in flight: a half-uploaded build is worse than a
+# queued one. Same reasoning as publish.yaml.
+concurrency:
+  group: railway-bot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: railway up
+    runs-on: ubuntu-latest
+
+    # workflow_run fires whatever the outcome, so the conclusion has to be
+    # checked explicitly or a failing test suite would still deploy.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch by default, which is
+          # not necessarily the commit that was tested.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      # The secrets context is not usable in a job-level `if`, so the check is
+      # a step. Without a token this reports why and stops, rather than failing
+      # every push to main with an authentication error that looks like a bug.
+      - name: Check for a deploy token
+        id: check
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "${RAILWAY_TOKEN}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::RAILWAY_TOKEN is not set, so nothing was deployed." \
+                 "Add it under Settings -> Secrets and variables -> Actions." \
+                 "See bot/RELEASING.md."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the Railway CLI
+        if: steps.check.outputs.configured == 'true'
+        run: npm install -g @railway/cli
+
+      # Uploaded from bot/ because that is the directory the service builds
+      # from. --ci streams build logs and exits, so the job reflects whether
+      # the build succeeded rather than only whether the upload did.
+      - name: Deploy
+        if: steps.check.outputs.configured == 'true'
+        working-directory: bot
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --ci
+
+      # The bot answering is not proof of much, but the API being down is what
+      # takes the website's member pages with it, so it is worth a look.
+      - name: Check the API is answering
+        if: steps.check.outputs.configured == 'true' && vars.BOT_API_URL != ''
+        run: |
+          set -euo pipefail
+          url="${{ vars.BOT_API_URL }}/api/health"
+          for attempt in $(seq 1 20); do
+            if curl -fsS --max-time 10 "$url" | grep -q '"ok"'; then
+              echo "API healthy after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::${url} did not answer after 5 minutes."
+          exit 1
