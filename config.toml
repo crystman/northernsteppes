@@ -20,9 +20,10 @@ build_search_index = false
 # the browser -- unset it and those pages have nothing to show. Everything
 # else on the site is still built statically and does not depend on it.
 #
-# This is the production bot. A fork that wants its own data points this at
-# its own deployment; see bot/RELEASING.md.
-api_url = "https://skillful-quietude-production-c396.up.railway.app"
+# FORK OVERRIDE: this branch deploys to crystman.github.io and reads the test
+# bot, so trying something out cannot touch real member records. Upstream
+# points at production; do not carry this line there.
+api_url = "https://skillful-quietude-test.up.railway.app"
 full_title = "Northern Steppes - Foam Fighting in Fort Wayne, Indiana"
 image = "social.webp"
 google = "battle_small.webp"
