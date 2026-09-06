@@ -8,6 +8,14 @@ The site is generated via [Zola](https://www.getzola.org/documentation/getting-s
 
 Everything in the `content/` directory is responsible for creating the content on the website. Pages can either be [Markdown](https://www.markdownguide.org/getting-started/) files (e.g. `content/bylaws.md`) or a folder with a `index.md` file inside (e.g. `content/proficiencies/`). Zola requires that all Markdown files have a header that's surrounded with `+++` - check out the files for examples.
 
+## What is deliberately switched off
+
+Some things the site describes are not wired up: the class system and its
+counters and flags, and the per-member unit field. Others used to exist and
+are gone: the member files, the git sync, the Tera rank macros. `DEFERRED.md`
+lists all of it, with why and what re-enabling would take. Worth reading
+before filing any of it as a bug.
+
 ## Local Development
 
 The site is built with [Zola](https://www.getzola.org/). **Use Zola 0.22.1** —
