@@ -1,0 +1,248 @@
+"""Rank and class-ladder rules for Northern Steppes members.
+
+The only implementation of these rules. The site used to carry a second copy
+as Tera macros, with a parity test to catch the two drifting apart; the site
+now asks this code through the API instead, so there is one set of rules and
+nothing to keep in agreement.
+
+The rules themselves are written down in ``content/proficiencies/``, which is
+what this is a port of.
+
+Every function here is pure: it takes a MemberSheet and returns a value. No
+database, no network, no Discord.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+
+RANK_NAMES = ("Unranked", "Peasant", "Savage", "Harbinger")
+LEVEL_NAMES = ("-", "Proficient", "Adept", "Master")
+
+SCOUT_NAMES = ("-", "Novice", "Trailrunner", "Master Scout")
+SOLDIER_NAMES = ("-", "Recruit", "Foot Soldier", "Cavalier")
+THIEF_NAMES = ("-", "Footpad", "Highwayman", "Master Thief")
+
+#: The four styles that gate Savage via the combat route.
+BASIC_STYLES = ("Single Sword", "Sword & Board", "Rock", "Javelin")
+
+#: Styles the Soldier ladder does not count as melee.
+RANGED_STYLES = ("Javelin", "Archery")
+
+
+@dataclass
+class MemberSheet:
+    """One member's record, as the rules need to see it.
+
+    Built by ``store.all_members()`` from the database rows. The shape is
+    inherited from the ``[extra]`` tables of the member files this replaced,
+    which is why weapons, professions and classes are separate dicts rather
+    than the single ``proficiencies`` table they are stored in.
+    """
+
+    slug: str
+    display_name: str = ""
+    waiver: bool = False
+    dues: bool = False
+    veteran_garb: bool = False
+    units: list[str] = field(default_factory=list)
+    weapons: dict[str, int] = field(default_factory=dict)
+    professions: dict[str, int] = field(default_factory=dict)
+    classes: dict[str, int] = field(default_factory=dict)
+    dues_years: dict[int, bool] = field(default_factory=dict)
+
+    def weapon(self, name: str) -> int:
+        return int(self.weapons.get(name, 0) or 0)
+
+    def class_value(self, name: str) -> int:
+        return int(self.classes.get(name, 0) or 0)
+
+    def paid_for(self, year: int) -> bool:
+        return bool(self.dues_years.get(year, False))
+
+
+def has_basic_styles(sheet: MemberSheet) -> bool:
+    """True when all four Savage-gating styles are above zero."""
+    return all(sheet.weapon(style) > 0 for style in BASIC_STYLES)
+
+
+DUES_PAID = "paid"
+DUES_BEHIND = "behind"
+DUES_NEVER = "never"
+
+
+def has_ever_paid(sheet: MemberSheet) -> bool:
+    """Whether any year is recorded as paid.
+
+    This, rather than the current year, is what gates rank. Ranks are earned
+    accolades: a member who has fallen behind on dues has not un-earned their
+    proficiencies, and stripping them on a date boundary would misrepresent
+    what they can actually do. Being behind is surfaced in the display
+    instead.
+    """
+    return any(sheet.dues_years.values())
+
+
+def dues_state(sheet: MemberSheet, today: date | None = None) -> str:
+    """How a member's dues stand, for display.
+
+    ``paid``    recorded for the current year.
+    ``behind``  has paid before, but not for the current year.
+    ``never``   no dues recorded at all.
+
+    Only ``never`` affects rank; ``behind`` is a warning, not a demotion.
+    """
+    today = today or date.today()
+    if sheet.paid_for(today.year):
+        return DUES_PAID
+    if has_ever_paid(sheet):
+        return DUES_BEHIND
+    return DUES_NEVER
+
+
+def rank(sheet: MemberSheet) -> int:
+    """Overall rank, 0-3, indexing into :data:`RANK_NAMES`.
+
+    The control flow still mirrors the Tera macro this was ported from, which
+    is why it reads more repetitively than it needs to. Left alone on purpose:
+    the shape is what makes it checkable against the written rules.
+    """
+    if not sheet.waiver:
+        return 0
+
+    # Peasant: waiver on file.
+    result = 1
+    if not has_ever_paid(sheet):
+        return result
+
+    if has_basic_styles(sheet):
+        # Savage via the combat route.
+        result = 2
+        if sheet.veteran_garb:
+            # Harbinger via a second-rank profession...
+            if any(v >= 2 for v in sheet.professions.values()):
+                result = 3
+            else:
+                # ...or via proficiency in every combat style.
+                result = 3
+                for value in sheet.weapons.values():
+                    if value == 0:
+                        result = 2
+    else:
+        # Savage via a single proficient non-combat profession.
+        for value in sheet.professions.values():
+            if value >= 1:
+                result = 2
+
+        # Harbinger via the same route: a second-rank non-combat profession
+        # plus veteran garb. No combat styles required, matching the rules in
+        # content/proficiencies/index.md.
+        if result == 2 and sheet.veteran_garb:
+            if any(v >= 2 for v in sheet.professions.values()):
+                result = 3
+
+    return result
+
+
+def rank_name(sheet: MemberSheet) -> str:
+    return RANK_NAMES[rank(sheet)]
+
+
+# The three ladders below are computed and served by the API, but shown
+# nowhere: the class system is being reworked and the counters they depend on
+# cannot be awarded yet. Deliberate -- see DEFERRED.md.
+
+def scout_rank(sheet: MemberSheet, overall: int | None = None) -> int:
+    """Scout ladder, 0-3."""
+    overall = rank(sheet) if overall is None else overall
+    i = 0
+    if overall > 1 and sum(1 for v in sheet.weapons.values() if v > 1) >= 2:
+        i = 1
+    if i == 1 and overall > 2 and sheet.class_value("Light_Armor") >= 3:
+        if sum(1 for v in sheet.weapons.values() if v > 1) >= 4:
+            i = 2
+    if i == 2 and sheet.class_value("Light_Armor") >= 6:
+        if sheet.weapon("Javelin") >= 3 or sheet.weapon("Archery") >= 3:
+            i = 3
+    return i
+
+
+def soldier_rank(sheet: MemberSheet, overall: int | None = None) -> int:
+    """Soldier ladder, 0-3."""
+    overall = rank(sheet) if overall is None else overall
+    melee_over_1 = sum(
+        1 for w, v in sheet.weapons.items() if v > 1 and w not in RANGED_STYLES
+    )
+    ranged_over_1 = sum(
+        1 for w, v in sheet.weapons.items() if v > 1 and w in RANGED_STYLES
+    )
+
+    i = 0
+    if overall > 1 and melee_over_1 >= 2:
+        i = 1
+    if i == 1 and overall > 2 and sheet.class_value("Armor") >= 3:
+        if melee_over_1 >= 3 and ranged_over_1 >= 1:
+            i = 2
+    if i == 2 and sheet.class_value("Armor") >= 6:
+        if any(v >= 3 for v in sheet.weapons.values()):
+            i = 3
+    return i
+
+
+def thief_rank(sheet: MemberSheet, overall: int | None = None) -> int:
+    """Thief ladder, 0-3."""
+    overall = rank(sheet) if overall is None else overall
+    i = 0
+    if overall > 1 and sheet.classes.get("Steal_10"):
+        i = 1
+    if i == 1 and overall > 2 and sheet.classes.get("Steal_20"):
+        i = 2
+    if i == 2 and sheet.classes.get("Steal_30") and sheet.classes.get("Look_Part"):
+        i = 3
+    return i
+
+
+def gaps(sheet: MemberSheet) -> list[str]:
+    """What this member still needs in order to reach the next rank.
+
+    Returns an empty list at Harbinger. This is the capability the site does
+    not have: the rules are precise enough to say exactly what is missing,
+    which today is a conversation with leadership.
+    """
+    current = rank(sheet)
+
+    if current == 0:
+        return ["Sign a waiver"]
+
+    if current == 1:
+        needs: list[str] = []
+        if not has_ever_paid(sheet):
+            needs.append("Pay membership dues")
+        missing = [s for s in BASIC_STYLES if sheet.weapon(s) == 0]
+        if missing and not any(v >= 1 for v in sheet.professions.values()):
+            needs.append(
+                "Become proficient in one non-combat profession, or in: "
+                + ", ".join(missing)
+            )
+        return needs
+
+    if current == 2:
+        # Harbinger needs veteran garb, plus either a second-rank non-combat
+        # profession or proficiency in every combat style. Both routes reach
+        # it, so this must offer both -- somebody who became Savage through
+        # professions is not required to take up the sword.
+        needs = []
+        if not sheet.veteran_garb:
+            needs.append("Own veteran level garb")
+        if not any(v >= 2 for v in sheet.professions.values()):
+            unproficient = sorted(w for w, v in sheet.weapons.items() if v == 0)
+            alternative = "Reach Adept in a non-combat profession"
+            if unproficient:
+                alternative += (
+                    ", or become proficient in: " + ", ".join(unproficient)
+                )
+            needs.append(alternative)
+        return needs
+
+    return []

@@ -1,0 +1,178 @@
+"""Tests for configuration, focused on the fail-closed properties.
+
+These matter more than they look: a misread here is the difference between
+"only leadership can record dues" and "anyone can".
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from northernsteppes_bot.config import DEFAULT_GUILD_ID, Config, is_leadership
+
+WRITE_VARS = (
+    "DISCORD_TOKEN", "DISCORD_GUILD_ID", "LEADERSHIP_ROLE_ID", "DATABASE_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    for name in WRITE_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_empty_environment_disables_write_commands():
+    assert Config.from_env().write_commands_enabled is False
+
+
+def test_role_id_and_database_enable_write_commands(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "12345")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert Config.from_env().write_commands_enabled is True
+
+
+def test_malformed_role_id_fails_closed(monkeypatch):
+    """A typo must not become 'no restriction'."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "not-a-number")
+    cfg = Config.from_env()
+    assert cfg.leadership_role_id is None
+    assert cfg.write_commands_enabled is False
+
+
+def test_blank_role_id_fails_closed(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "   ")
+    assert Config.from_env().write_commands_enabled is False
+
+
+def test_guild_id_defaults_to_northern_steppes():
+    assert Config.from_env().guild_id == DEFAULT_GUILD_ID
+
+
+def test_guild_id_override(monkeypatch):
+    monkeypatch.setenv("DISCORD_GUILD_ID", "999")
+    assert Config.from_env().guild_id == 999
+
+
+# --- the actual permission gate -------------------------------------------
+
+def test_is_leadership_false_when_role_unset():
+    """The current deployment state: role not yet created."""
+    cfg = Config.from_env()
+    assert is_leadership(cfg, [111, 222]) is False
+
+
+def test_is_leadership_false_for_unrelated_roles(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    assert is_leadership(Config.from_env(), [111, 222]) is False
+
+
+def test_is_leadership_true_with_the_role(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert is_leadership(Config.from_env(), [111, 555]) is True
+
+
+def test_is_leadership_accepts_string_role_ids(monkeypatch):
+    """Discord IDs are frequently strings; a type mismatch must not silently
+    fail open or closed by accident."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert is_leadership(Config.from_env(), ["555"]) is True
+
+
+def test_is_leadership_false_for_empty_roles(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    assert is_leadership(Config.from_env(), []) is False
+
+
+# --- writes need somewhere to go, too --------------------------------------
+
+def test_role_without_a_database_still_disables_writes(monkeypatch):
+    """Accepting a /dues command with no database would discard it silently,
+    leaving leadership believing dues were recorded."""
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    cfg = Config.from_env()
+    assert cfg.database_url is None
+    assert cfg.write_commands_enabled is False
+
+
+def test_database_without_a_role_disables_writes(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert Config.from_env().write_commands_enabled is False
+
+
+def test_both_together_enable_writes(monkeypatch):
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/x")
+    assert Config.from_env().write_commands_enabled is True
+
+
+def test_posture_names_the_missing_piece(monkeypatch):
+    assert "no leadership role" in Config.from_env().describe_posture()
+    monkeypatch.setenv("LEADERSHIP_ROLE_ID", "555")
+    assert "no database" in Config.from_env().describe_posture()
+
+
+# --- token shape -----------------------------------------------------------
+
+def test_a_bot_token_has_three_parts():
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("MTU0NTYy.Gx3f2K.abc123") is True
+
+
+def test_a_client_secret_is_rejected():
+    """The likely mistake: it sits one tab away in the developer portal and
+    Discord only answers with a bare 401 at login."""
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6") is False
+
+
+def test_an_empty_segment_is_rejected():
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("MTU0NTYy..abc123") is False
+
+
+def test_too_many_parts_is_rejected():
+    from northernsteppes_bot.config import looks_like_a_bot_token
+    assert looks_like_a_bot_token("a.b.c.d") is False
+
+
+# --- the defaulted guild ---------------------------------------------------
+
+def test_an_unset_guild_is_flagged_as_defaulted(monkeypatch):
+    """The fallback is the real Northern Steppes guild, so a deployment that
+    forgot to set it would register commands in production."""
+    monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
+    cfg = Config.from_env()
+    assert cfg.guild_id == DEFAULT_GUILD_ID
+    assert cfg.guild_is_defaulted is True
+
+
+def test_an_explicit_guild_is_not_flagged(monkeypatch):
+    monkeypatch.setenv("DISCORD_GUILD_ID", "1279582837749842092")
+    cfg = Config.from_env()
+    assert cfg.guild_is_defaulted is False
+
+
+# --- API origins -----------------------------------------------------------
+
+def test_origins_default_to_the_site_and_local_serve(monkeypatch):
+    from northernsteppes_bot.config import DEFAULT_API_ORIGINS
+    monkeypatch.delenv("API_ALLOWED_ORIGINS", raising=False)
+    assert Config.from_env().api_allowed_origins == DEFAULT_API_ORIGINS
+
+
+def test_origins_can_be_configured(monkeypatch):
+    monkeypatch.setenv(
+        "API_ALLOWED_ORIGINS",
+        "https://crystman.github.io, https://northernsteppes.com",
+    )
+    assert Config.from_env().api_allowed_origins == (
+        "https://crystman.github.io", "https://northernsteppes.com",
+    )
+
+
+def test_blank_origins_fall_back_to_the_defaults(monkeypatch):
+    from northernsteppes_bot.config import DEFAULT_API_ORIGINS
+    monkeypatch.setenv("API_ALLOWED_ORIGINS", "   ")
+    assert Config.from_env().api_allowed_origins == DEFAULT_API_ORIGINS

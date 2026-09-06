@@ -9,3 +9,10 @@ public/
 *.synctex.gz
 # Zola writes a resized-image cache here during builds
 static/processed_images/
+
+# Python (bot/)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
