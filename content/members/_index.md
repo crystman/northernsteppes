@@ -1,9 +1,7 @@
 +++
 title = "Members"
 
-page_template = "member.html"
 template = "members.html"
-sort_by = "title"
 
 [extra]
 header = true

@@ -1,0 +1,190 @@
+{% extends "index.html" %}
+
+{#- One page that renders any member from the API, read from ?member=<slug>.
+
+    Member records live in the database; there are no member files, so there is
+    nothing for Zola to build a per-member page out of. One page that fetches
+    the member it was asked for is what replaces them.
+
+    That trades away being indexable, and being readable without scripting, for
+    a page that is correct the moment leadership records something in Discord
+    rather than after a commit -- and one that exists for every member, not
+    only those somebody remembered to add a file for. -#}
+
+{% block title %}Member{% endblock title %}
+
+{% block content %}
+<article class="post-single">
+    <header class="post-header">
+        <h1 class="post-title" id="member-name">Member</h1>
+        <div class="post-meta" id="member-rank"></div>
+    </header>
+
+    <div class="post-content">
+        {#- Everything below is filled in by the script. Without scripting, or
+            with the API unreachable, the notice is what remains -- which is
+            honest, since there is nothing committed to fall back on. -#}
+        <p id="member-status">Loading…</p>
+        <div id="member-body" hidden>
+            <dl id="member-why"></dl>
+            {#- No class ladders: that system is being reworked. See
+                DEFERRED.md at the repository root. -#}
+            <div id="member-styles"></div>
+            <div id="member-professions"></div>
+            <div id="member-gaps"></div>
+        </div>
+        <p id="member-back">
+            <a href="{{ get_url(path="members", trailing_slash=true) }}">← All members</a>
+        </p>
+    </div>
+</article>
+
+{% if config.extra.api_url %}
+<script>
+(function () {
+    var API = {{ config.extra.api_url | json_encode | safe }}.replace(/\/+$/, "");
+    var slug = new URLSearchParams(window.location.search).get("member");
+    var status = document.getElementById("member-status");
+
+    function say(text) { status.textContent = text; status.hidden = false; }
+
+    if (!slug) {
+        say("No member was specified. Pick someone from the members list.");
+        return;
+    }
+
+    {#- Where each kind of proficiency is written up. Resolved at build time so
+        a fork links to its own copy rather than the canonical domain. #}
+    var PAGES = {
+        ranks:       "{{ get_url(path='proficiencies', trailing_slash=true) }}",
+        styles:      "{{ get_url(path='proficiencies/combat-styles', trailing_slash=true) }}",
+        professions: "{{ get_url(path='proficiencies/non-combat-classes', trailing_slash=true) }}",
+        classes:     "{{ get_url(path='proficiencies/classes', trailing_slash=true) }}"
+    };
+
+    // Those pages anchor each section on the slugified heading text, which is
+    // exactly the name the database holds -- "Sword & Board" is written up
+    // under #sword-board. A test asserts every name the database can hold has
+    // a matching heading, so these links cannot rot quietly.
+    function slugify(name) {
+        return name.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+                   .replace(/^-+|-+$/g, "");
+    }
+
+    // textContent everywhere rather than innerHTML: the values come from the
+    // API, and building markup out of them would make a bug there a scripting
+    // hole here. The href is safe for the same reason -- slugify() emits only
+    // [a-z0-9-], so nothing from the API survives into it.
+    function link(name, page) {
+        var a = document.createElement("a");
+        a.href = page + "#" + slugify(name);
+        a.textContent = name;
+        return a;
+    }
+
+    function section(container, heading, items) {
+        if (!items.length) return;
+        var h = document.createElement("h2");
+        h.textContent = heading;
+        container.appendChild(h);
+        var ul = document.createElement("ul");
+        items.forEach(function (item) {
+            var li = document.createElement("li");
+            if (typeof item === "string") {
+                li.textContent = item;
+            } else {
+                li.appendChild(link(item.name, item.page));
+                if (item.level) {
+                    li.appendChild(document.createTextNode(" — " + item.level));
+                }
+            }
+            ul.appendChild(li);
+        });
+        container.appendChild(ul);
+    }
+
+    function entries(levels, page) {
+        return Object.keys(levels || {}).map(function (name) {
+            return {name: name, level: levels[name], page: page};
+        });
+    }
+
+    var controller = new AbortController();
+    setTimeout(function () { controller.abort(); }, 8000);
+
+    fetch(API + "/api/members/" + encodeURIComponent(slug), { signal: controller.signal })
+        .then(function (r) {
+            if (r.status === 404) return null;
+            if (!r.ok) throw new Error("api " + r.status);
+            return r.json();
+        })
+        .then(function (m) {
+            if (!m) {
+                say("No member called “" + slug + "”.");
+                return;
+            }
+
+            document.title = m.name + " — Northern Steppes";
+            document.getElementById("member-name").textContent = m.name;
+            // Unranked alone has no section to point at -- it is the absence
+            // of a rank rather than one you earn -- so it stays plain text.
+            var rankLine = document.getElementById("member-rank");
+            if (m.rank === "Unranked") {
+                rankLine.textContent = m.rank;
+            } else {
+                rankLine.appendChild(link(m.rank, PAGES.ranks));
+            }
+
+            var why = document.getElementById("member-why");
+            [
+                ["Waiver on file", m.waiver ? "Yes" : "No"],
+                ["Dues", ({
+                    paid: "Paid for " + m.dues.year,
+                    behind: "Not up to date",
+                    never: "None recorded"
+                })[m.dues.state] || "Unknown"],
+                ["Veteran garb", m.veteran_garb ? "Yes" : "No"]
+            ].forEach(function (pair) {
+                var dt = document.createElement("dt");
+                dt.textContent = pair[0];
+                var dd = document.createElement("dd");
+                dd.textContent = pair[1];
+                why.appendChild(dt);
+                why.appendChild(dd);
+            });
+
+            // m.classes -- the Scout/Soldier/Thief ladders -- is deliberately
+            // not rendered. The class system is being reworked and the ladders
+            // are computed from counters nothing can award yet, so showing them
+            // would state a rank nobody can act on. See DEFERRED.md.
+            section(
+                document.getElementById("member-styles"), "Weapon styles",
+                entries(m.weapons, PAGES.styles)
+            );
+            section(
+                document.getElementById("member-professions"), "Professions",
+                entries(m.professions, PAGES.professions)
+            );
+            // Gaps are sentences, not proficiency names, so they stay plain.
+            section(
+                document.getElementById("member-gaps"), "Next rank needs", m.gaps
+            );
+
+            status.hidden = true;
+            document.getElementById("member-body").hidden = false;
+        })
+        .catch(function () {
+            say(
+                "Could not load this member right now. " +
+                "Try again shortly, or see the members list."
+            );
+        });
+})();
+</script>
+{% else %}
+<script>
+    document.getElementById("member-status").textContent =
+        "Live member lookup is not configured on this site.";
+</script>
+{% endif %}
+{% endblock content %}

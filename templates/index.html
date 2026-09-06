@@ -75,6 +75,8 @@
         <link rel="canonical" href="{{ get_url(path="", trailing_slash=false) }}" />
         {% endif %}
 
+        {% if page.extra.robots %}<meta name="robots" content="{{ page.extra.robots }}">{% endif %}
+
         <!-- Favicon -->
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
         <link rel="icon" type="image/png" sizes="144x144" href="/favicon-144x144.png">

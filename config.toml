@@ -15,6 +15,15 @@ build_search_index = false
 # highlight_code = false
 
 [extra]
+# Base URL of the bot's read-only API. Member records live in its database and
+# nowhere else, so the roster and every member page are fetched from here in
+# the browser -- unset it and those pages have nothing to show. Everything
+# else on the site is still built statically and does not depend on it.
+#
+# NOTE: this currently points at the *test* deployment. Point it at the
+# production bot before merging upstream, or northernsteppes.com will read
+# its roster from a scratch database.
+api_url = "https://skillful-quietude-test.up.railway.app"
 full_title = "Northern Steppes - Foam Fighting in Fort Wayne, Indiana"
 image = "social.webp"
 google = "battle_small.webp"

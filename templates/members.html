@@ -1,73 +1,135 @@
-{% import "ranks.html" as ranks %}
-{% extends "section.html" %}
+{% extends "index.html" %}
+
+{#- The roster is rendered from the API in the browser.
+
+    Member records live in the database now; there are no member files, so
+    there is nothing for Zola to render at build time. That is a deliberate
+    trade: the roster is no longer visible to search engines, in exchange for
+    one source of truth and a list that is correct the moment leadership
+    records something in Discord rather than after a commit.
+
+    Without scripting, or with the API unreachable, the notice below is what
+    remains -- there is no committed copy to fall back on. -#}
 
 {% block content %}
-
-{% set rank_names = ["Unranked", "Peasant", "Savage", "Harbinger"] %}
-{% set year = now() | date(format="%Y") %}
-
 <article class="post-single">
     <header class="post-header">
-        <h1 class="post-title">Current Members</h1>
+        <h1 class="post-title">Members</h1>
     </header>
     <div class="post-content">{{ section.content | safe }}</div>
-    {% if paginator %}
-        {% set pages = paginator.pages %}
-    {% else %}
-        {% set pages = section.pages %}
-    {% endif %}
 
-    {% for page in pages %}
+    <p id="roster-status">Loading the roster…</p>
 
-    {% if page.extra.dues[year] %}
+    <div id="roster-body" hidden>
+        <header class="post-header"><h2 id="roster-current-heading"></h2></header>
+        <div id="roster-current"></div>
 
-        {% set rank = ranks::rank(extra=page.extra) | trim | int %}
+        <header class="post-header" id="roster-past-heading-wrap" hidden>
+            <h2>Last Year&#39;s Members</h2>
+        </header>
+        <div id="roster-past"></div>
 
-
-        <div>
-            <a aria-label="post link to {{ page.title }}" href="{{ page.permalink }}">
-                <span><b>{{ page.title }}</b></span>
-                <span class="post-meta">
-                {{ rank_names[rank] }}
-                </span>
-            </a>
-        </div>
-   
-    {% endif %}
-    {% endfor %}
-
-
-
-    <header class="post-header">
-    <h2>Past Members</h2>
-    </header>
-
-    {% for page in pages %}
-
-    {% if not page.extra.dues[year] %}
-
-        {% set rank = ranks::rank(extra=page.extra) | trim | int %}
-
-        <div>
-            <a aria-label="post link to {{ page.title }}" href="{{ page.permalink }}">
-                <span><b>{{ page.title }}</b></span>
-                {# <span class="post-meta">
-                {{ rank_names[rank] }}
-                </span> #}
-            </a>
-        </div>
-
-    {% endif %}
-    {% endfor %}
-
-    <footer class="post-footer">
-        {% if section.taxonomies and section.taxonomies.tags %}
-        <ul class="post-tags">
-        {% for tag in section.taxonomies.tags %}
-            <li><a href="{{ get_taxonomy_url(kind="tags", name=tag) | safe }}">{{ tag }}</a></li>
-        {% endfor %}
-        </ul>
-        {% endif %}
-    </footer>
+        <header class="post-header" id="roster-new-heading-wrap" hidden>
+            <h2>No Dues Recorded Yet</h2>
+        </header>
+        <div id="roster-new"></div>
+    </div>
 </article>
+
+{% if config.extra.api_url %}
+<script>
+(function () {
+    var API = {{ config.extra.api_url | json_encode | safe }}.replace(/\/+$/, "");
+    var LOOKUP = "{{ get_url(path='member', trailing_slash=true) }}";
+    var status = document.getElementById("roster-status");
+
+    function row(member) {
+        var wrap = document.createElement("div");
+        var link = document.createElement("a");
+        link.href = LOOKUP + "?member=" + encodeURIComponent(member.slug);
+        var name = document.createElement("span");
+        var bold = document.createElement("b");
+        // textContent rather than markup: these values come from the API, and
+        // building HTML out of them would make a bug there a scripting hole.
+        bold.textContent = member.name;
+        name.appendChild(bold);
+        link.appendChild(name);
+        var meta = document.createElement("span");
+        meta.className = "post-meta";
+        meta.textContent = " " + member.rank;
+        link.appendChild(meta);
+        wrap.appendChild(link);
+        return wrap;
+    }
+
+    var controller = new AbortController();
+    setTimeout(function () { controller.abort(); }, 8000);
+
+    fetch(API + "/api/members", { signal: controller.signal })
+        .then(function (r) {
+            if (!r.ok) throw new Error("api " + r.status);
+            return r.json();
+        })
+        .then(function (data) {
+            var current = [], past = [], fresh = [];
+            data.members.forEach(function (m) {
+                if (m.dues.state === "paid") current.push(m);
+                else if (m.dues.state === "behind") past.push(m);
+                else fresh.push(m);
+            });
+
+            document.getElementById("roster-current-heading").textContent =
+                "Current Members (" + data.year + ")";
+
+            // Highest rank first, then by name, so the list reads the way the
+            // proficiency system is ordered rather than alphabetically flat.
+            var order = ["Harbinger", "Savage", "Peasant", "Unranked"];
+            current.sort(function (a, b) {
+                var d = order.indexOf(a.rank) - order.indexOf(b.rank);
+                return d !== 0 ? d : a.name.localeCompare(b.name);
+            });
+            [past, fresh].forEach(function (list) {
+                list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+            });
+
+            current.forEach(function (m) {
+                document.getElementById("roster-current").appendChild(row(m));
+            });
+            past.forEach(function (m) {
+                document.getElementById("roster-past").appendChild(row(m));
+            });
+            fresh.forEach(function (m) {
+                document.getElementById("roster-new").appendChild(row(m));
+            });
+
+            if (!current.length) {
+                var none = document.createElement("p");
+                var em = document.createElement("em");
+                em.textContent = "Nobody has " + data.year +
+                    " dues recorded yet. This list fills as dues come in.";
+                none.appendChild(em);
+                document.getElementById("roster-current").appendChild(none);
+            }
+            if (past.length) {
+                document.getElementById("roster-past-heading-wrap").hidden = false;
+            }
+            if (fresh.length) {
+                document.getElementById("roster-new-heading-wrap").hidden = false;
+            }
+
+            status.hidden = true;
+            document.getElementById("roster-body").hidden = false;
+        })
+        .catch(function () {
+            status.textContent =
+                "The roster could not be loaded right now. Please try again shortly.";
+        });
+})();
+</script>
+{% else %}
+<script>
+    document.getElementById("roster-status").textContent =
+        "The roster is not available on this site.";
+</script>
+{% endif %}
 {% endblock content %}
