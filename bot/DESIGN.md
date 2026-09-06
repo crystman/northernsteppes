@@ -1,314 +1,212 @@
 # Northern Steppes Discord Bot — Design
 
-Status: **draft for review**. No code written yet.
+Status: **built**. This describes what exists, and why it is shaped this way.
+For what is switched off, see [`../DEFERRED.md`](../DEFERRED.md); for how to
+run it, [`README.md`](README.md).
 
 ## Goal
 
 Let leadership maintain member records from Discord instead of hand-editing
 TOML, and give members self-service access to their own proficiency sheet.
 
-The immediate motivating bug: `templates/members.html` lists someone under
-"Current Members" only if `extra.dues[<current year>]` is true. No member file
-has a 2026 entry, so the roster has been empty since January and every member
-displays under "Past Members". Updating dues means editing 21 files by hand,
-which is exactly why it didn't happen.
+The motivating bug: `templates/members.html` listed someone under "Current
+Members" only if `extra.dues[<current year>]` was true. No member file had a
+2026 entry, so the roster was empty from January and every member — leadership
+included — displayed as a past member. Fixing it meant editing 21 files by
+hand, which is exactly why it had not happened.
 
 ## Architecture
 
-Three stores, each holding what it is actually good at.
+One store, holding every member record.
 
 ```
 Discord  ──slash command──▶  Bot (Railway)  ──write──▶  Postgres (Railway)
                                   │                          │
-                                  │  debounced sync          │
+                                  │  read-only HTTP API      │
                                   ▼                          │
-                          GitHub Git Data API                │
-                                  │                          │
-                                  ▼                          │
-                      content/members/_*.md  ──push──▶  Actions ──▶ Pages
-                                                               │
-   client-side fetch ◀── read-only API (later, live data) ◀────┘
+                          browser  ◀───── fetch ─────────────┘
+                             ▲
+                             │
+                     GitHub Pages (the rest of the site, built statically)
 ```
 
-**Postgres is the write buffer and query store.** Commands write here and
-return immediately, so `/rank` and `/roster` answer without a GitHub round
-trip. It was also intended to hold the append-only, high-volume data —
-attendance, RSVPs and an award audit log — though those tables are deferred
-for now; see the note under Schema.
+**Postgres holds member records, and nothing else does.** There are no member
+files in the repository. A command writes a row; the next read — from the bot
+or from the website — sees it. Nothing renders, commits, or reconciles in
+between.
 
-**Git stays the canonical record for member sheets.** The rendered
-`content/members/_<slug>.md` files remain what the site builds from, so the
-site never depends on Railway being up, hand-editing keeps working, and every
-rank award lands in the commit history with a date and an author.
+**The site fetches the roster and member pages in the browser.** Everything
+else on the site is still an ordinary static Zola build; only member data
+comes from the API.
 
-**The sync is debounced, not per-command.** One commit per command means one
-deploy per command — recording dues for 21 members at a gathering would queue
-21 sequential deploys, since `.github/workflows/publish.yaml` sets
-`cancel-in-progress: false`. Instead the bot marks state dirty, waits for
-quiet, and writes one commit containing everything that changed.
+**The rank rules live in one place**, `northernsteppes_bot/ranks.py`, ported
+from `content/proficiencies/`. Pure functions, no database or Discord, so they
+are testable directly.
 
-### Why not the alternatives
+### This replaced an earlier design, and why
+
+The first version of this document specified something different: Postgres as
+a write buffer, **git as the canonical record**, and a debounced sync
+rendering rows back into `content/members/_*.md` and committing them. The site
+would build from those files as it always had, keeping an audit trail and
+working without the bot being up.
+
+It was built, then abandoned. The reasons are worth keeping, because they are
+the argument against rebuilding it:
+
+- **Two sources of truth produced every bug in the project.** `/dues` wrote
+  the database while `/roster` read the file cache, so one command reported
+  success and the next disagreed. A member created by the bot had no page
+  until a sync committed one. Each was fixed individually; each was the same
+  bug.
+- **The rank rules had to exist twice** — Python for the bot, Tera macros for
+  the build — with a parity test whose entire job was catching them drift
+  apart. That test also required a full Zola install in CI.
+- **The audit trail argument did not survive contact.** What git recorded was
+  the *sync job* rewriting files, not who awarded what. `recorded_by` on the
+  row is the audit trail, and it is more accurate.
+- **The freshness argument was the wrong way round.** The sync was justified
+  as free because both paths took ~90 seconds. In practice a reader wants the
+  roster right *now*, and the debounce window was latency added on top of a
+  deploy.
+
+What was genuinely lost: member pages are no longer indexable or readable
+without scripting, and **git is no longer a backup of member data**.
+`backup.py` exists because of that second one.
+
+### Why not the other alternatives
 
 | Option | Why not |
 |---|---|
-| Zola `load_data(url=...)` against a Railway API | Verified working on 0.22.1, including graceful `required=false` degradation. But it trades away the git audit trail for freshness we don't gain — both paths are ~90s. |
-| Commit per command | Deploy queue backlog, noisy history. |
-| Daily cron opening a PR, as the primary path | Up to 24h latency plus a human merge before a `/dues` command shows up on the site. Kept instead as a reconciliation net, below. |
-| Client-side fetch for the roster | The roster should be in the HTML for search engines and no-JS readers. Reserved for genuinely live data. |
+| Zola `load_data(url=...)` at build time | Verified working on 0.22.1, `required=false` degrading cleanly. But it freezes member data at build time, which is the problem being solved. |
+| Commit per command | One deploy per command. `publish.yaml` sets `cancel-in-progress: false`, so recording dues for 21 members would queue 21 sequential deploys. |
+| Daily cron opening a PR | Up to 24h plus a human merge before a `/dues` shows on the site. |
 
 ## Schema
 
-```sql
-create table members (
-    id              uuid primary key default gen_random_uuid(),
-    slug            text unique not null,   -- 'lamp' -> content/members/_lamp.md
-    display_name    text not null,          -- TOML `title`
-    discord_user_id text unique,            -- null until linked
-    member_since    date,
-    units           text[] not null default '{}',  -- a member can be in several
-    waiver          boolean not null default false,
-    veteran_garb    boolean not null default false,
-    archived        boolean not null default false,
-    created_at      timestamptz not null default now(),
-    updated_at      timestamptz not null default now()
-);
+`migrations/*.sql`, plain files applied once each in filename order, tracked
+by name in `schema_migrations`. Deliberately smaller than a migration
+framework — a volunteer should be able to read the whole mechanism in a
+minute. Note the corollary: **files are tracked by name, not by content**, so
+editing an already-applied migration does nothing to an existing database.
 
--- A row means "paid". There is no `paid` column because no member file has
--- ever recorded a year as false, so a false row would have no meaning: dues
--- are either recorded or they are not.
-create table dues_paid (
-    member_id   uuid not null references members on delete cascade,
-    year        int  not null,
-    recorded_by text not null,              -- discord user id, or 'bootstrap'
-    recorded_at timestamptz not null default now(),
-    primary key (member_id, year)
-);
+| Table | Holds |
+|---|---|
+| `members` | identity, slug, waiver, veteran garb, units, Discord link |
+| `dues_paid` | one row per member-year; a row means paid |
+| `proficiency_defs` | the permitted `(kind, name)` pairs |
+| `proficiencies` | a member's level in one of those pairs |
 
--- The set of proficiencies is fixed by content/proficiencies/ and effectively
--- never changes, so it is constrained in the database rather than only in
--- code. A seeded lookup table rather than an enum: a composite foreign key
--- can enforce that a 'weapon' row carries a weapon name, which an enum
--- cannot, and adding one later is an INSERT rather than an ALTER TYPE.
---
--- Weapons only for now -- see the deferral note below.
-create table proficiency_defs (
-    kind text not null check (kind in ('weapon')),
-    name text not null,
-    primary key (kind, name)
-);
+Two shapes worth explaining:
 
-create table proficiencies (
-    member_id uuid not null references members on delete cascade,
-    kind      text not null,
-    name      text not null,
-    level     int  not null default 0 check (level >= 0),
-    primary key (member_id, kind, name),
-    foreign key (kind, name) references proficiency_defs (kind, name)
-);
+**`dues_paid` has no `paid` column.** A row means paid; absence means not. A
+boolean would allow a row saying "not paid", which is the same information as
+no row and invites the two to disagree.
 
-create table sync_state (
-    id              int primary key default 1 check (id = 1),
-    dirty_since     timestamptz,
-    last_synced_at  timestamptz,
-    last_commit_sha text
-);
-```
+**`proficiencies` has a composite foreign key** onto `proficiency_defs`, so
+the database rejects a proficiency the club does not define. That is what
+turns a typo in `/award` into a message listing the valid names rather than a
+row nobody notices. `known_proficiencies()` reads the same table for
+autocomplete, so what a command offers and what it accepts cannot drift.
 
-`proficiency_defs` is seeded in the same migration, so a typo in a command
-cannot invent a proficiency the site templates do not render — the insert
-fails rather than silently creating a "Sword and Board" that never displays.
-
-**Deferred for now:** `awards`, `practices`, `attendance` and `event_rsvps`,
-plus the `class`, `profession`, `counter` and `flag` proficiency kinds.
-
-The proficiency kinds are deferred because that system is being reworked.
-Defining none of them means the composite foreign key makes it impossible to
-assign one to a member and then have to clean it up later. The eleven weapon
-styles are seeded and match `content/proficiencies/combat-styles.md` and the
-`[extra.weapons]` tables exactly.
-
-Nothing is removed from the member files, so no data is lost — those fields
-simply stay hand-edited and outside the bot's control until the rework lands.
-
-**This splits where the read commands get their data.** `rank()` needs
-professions (the route to Savage) and classes (the scout, soldier and thief
-ladders), and neither is in the database. The rank rules already operate on a
-`MemberSheet` parsed from the member files rather than on database rows, so
-`/rank` and `/gaps` read weapons and dues from Postgres and the rest from the
-files. That is workable but it is a second data path, and it should collapse
-back into one once the proficiency rework lands.
-
-Worth noting what deferring the four tables costs: those were the append-only,
-genuinely database-shaped data. What remains is a mirror of data that already
-lives in git. The database still earns its place as the write buffer that makes
-the debounced sync possible, and as the query store behind instant `/roster`
-replies — but if those four stay deferred indefinitely, reading the member
-files straight from GitHub would be a reasonable simplification.
-
-Dropping `awards` also means the record of *who* awarded a proficiency now
-lives only in the git commit that recorded it, rather than in a queryable
-table. For a club awarding ranks at monthly gatherings that is probably
-enough, and the commit trail is durable, but it is a real reduction.
-
-## Sync
-
-Every write command sets `sync_state.dirty_since = coalesce(dirty_since, now())`.
-
-An `asyncio` task in the bot process wakes every 60s and syncs once
-`now() - dirty_since > SYNC_DEBOUNCE_SECONDS` (default 300):
-
-1. Read the current `content/members/_*.md` from GitHub at a known ref SHA.
-2. For each member, load the existing frontmatter with **`tomlkit`**, mutate
-   only the changed keys, and dump. tomlkit preserves style, so key order,
-   alignment and blank lines survive and the diff shows only real changes.
-3. Drop any file whose rendered bytes equal the current bytes.
-4. If nothing remains, clear `dirty_since` and stop — no empty commits.
-5. Otherwise write **one** commit containing all changed files via the Git Data
-   API (blobs → tree → commit → update ref), so a gathering's worth of edits is
-   a single reviewable change.
-6. On a ref conflict, re-read and retry, up to 3 times.
-7. Record `last_commit_sha`, clear `dirty_since`.
-
-The existing `push` trigger on `main` deploys it. No new workflow trigger is
-needed for this path.
-
-Commit message format:
-
-```
-chore(members): record dues for 3 members, 2 proficiency awards
-
-Dues 2026: kimba, rhino, saewyn
-Awards:    lamp Flail 2->3, goose "Sword & Board" 1->2
-
-Recorded via Discord by <display name> and <display name>.
-```
-
-**Guardrails.** The bot only ever writes files under `content/members/`.
-`DRY_RUN` logs the diff without committing, and `SYNC_ENABLED=false` is a kill
-switch that leaves commands working while stopping all writes.
-
-### Reconciliation net
-
-A scheduled GitHub Actions workflow (daily) compares Postgres against the
-committed files and opens a PR **only when they have drifted**.
-
-This lives in Actions rather than in the bot deliberately: it is a safety net
-for "the bot failed to sync", so it must not share the bot's failure modes. If
-it cannot reach the database at all, the failed run is itself the alert.
-
-A PR that appears only when something is genuinely wrong is a PR people will
-read. A daily PR that is usually empty trains everyone to rubber-stamp it.
+`sync_state` existed for the abandoned sync, and migration 003 drops it.
 
 ## Rank logic
 
-The rank rules currently exist once, as the `rank()` macro in
-`templates/ranks.html`. The bot needs them too, for `/rank` and `/gaps`.
+`ranks.py`, the only implementation. Two rule corrections came out of writing
+the rules down as testable code:
 
-Rather than pick one home, keep both and **test that they agree**. The site
-keeps its self-contained Tera implementation so it never depends on the bot;
-the bot gets a tested Python implementation; and CI builds the site and asserts
-the Tera-rendered rank equals the Python-computed rank for every member. Any
-drift fails the build.
-
-This is cheap — extracting rendered ranks from built HTML is already a solved
-problem here, having been used to verify the `rank()` macro refactor in #5.
+- **Harbinger through the non-combat route.** `content/proficiencies/index.md`
+  describes it; the Tera macro gated Harbinger behind the combat route.
+- **Dues gate on having *ever* paid**, not on a flag that read true for all 21
+  members regardless of what anyone had paid. A member behind on this year has
+  not un-earned their proficiencies; being behind is shown, not punished.
 
 ## Commands
 
-Leadership-gated. The role check runs **inside the handler** against
-`LEADERSHIP_ROLE_ID`; `default_member_permissions` only hides a command in the
-picker, it does not secure it.
-
-| Command | Effect |
+| | |
 |---|---|
-| `/dues paid member: year:` | Records dues — fixes the empty-roster bug |
-| `/award member: kind: name: level:` | Sets a proficiency |
-| `/waiver member: signed:` | Sets waiver status |
-| `/veteran-garb member: owns:` | Sets veteran garb |
-| `/member-add name: slug:` | Creates a member and their file |
-| `/link member: discord:` | Maps a member to a Discord account |
-| `/sync-now` | Forces a sync, bypassing the debounce |
+| Read | `/rank`, `/gaps`, `/roster`, `/me` |
+| Write | `/dues`, `/dues-remove`, `/award`, `/profession`, `/waiver`, `/veteran-garb`, `/link` |
+| Admin | `/member-add` |
 
-Open to everyone:
+`/gaps` says exactly what a member still needs for their next rank — the one
+thing the website could never do.
 
-| Command | Effect |
-|---|---|
-| `/rank [member]` | Computed rank, and the reason for it |
-| `/gaps [member]` | What is still needed for the next rank |
-| `/roster [rank]` | Current members, grouped by rank |
-| `/me` | Your own sheet |
-| `/practice` | Next practice time and location |
+**Every write is correctable from Discord.** `/award` and `/profession` take
+level 0 to clear one; `/waiver` and `/veteran-garb` take a boolean; `/link`
+reassigns and reports who lost the account. `/dues-remove` exists because
+recording dues only ever inserted, which made a year entered against the wrong
+member permanent. It requires the year rather than defaulting to the current
+one — recording happens in bulk, where the default is nearly always right,
+while removing is rare and deliberate, and a default only creates a way to
+clear the wrong year.
 
-`/gaps` is worth building early: the rank rules are precise enough to compute
-exactly what someone is missing, which today is a conversation with leadership.
+Commands register to one guild, so they appear immediately rather than taking
+up to an hour to propagate.
 
-`/checkin` and `/rsvp` are dropped from this pass along with the tables they
-would write to.
+## Identity and permissions
 
-## Identity
+`/link` maps a Discord account to a member, and `/me` resolves through it.
+Matching on display name instead would risk showing one person's sheet to
+another.
 
-Member files key on nickname (`_lamp.md`, `_kaigar.md`) with no stable ID.
-`members.slug` preserves that mapping, `members.id` gives a stable key that
-survives a rename, and `discord_user_id` is nullable so a member record can
-exist before that person is linked — the roster predates the bot.
+Writes are gated on a leadership role **and** the configured guild, checked
+inside every handler. Discord's `default_member_permissions` only hides a
+command in the picker; it does not stop anyone who knows the name. The guild
+check means a test instance invited to the real server cannot edit real
+records — and it runs before the role check, so the wrong server says so
+rather than leaking whether the caller would otherwise have had permission.
 
-`/link` is leadership-gated: self-service linking would let anyone claim
-another member's sheet.
+Everything dangerous fails closed. A malformed role id counts as *no role*,
+never as *no restriction*: the safe reading of a typo is that nobody is
+leadership, not that everybody is.
+
+## The read API
+
+Read-only and unauthenticated, serving only what the site already publishes.
+`discord_user_id` never appears in a payload; two tests enforce that.
+
+It starts **before** connecting to Discord, deliberately. The API needs
+nothing from Discord, so a bad token, an outage or a login rate limit must not
+take the website's member data down too. A 429 holds the process open rather
+than exiting, because exiting has the host restart straight into another login
+attempt — which is what earns the block in the first place.
+
+`API_ALLOWED_ORIGINS` replaces the default origin list, so a fork deployed to
+its own Pages URL needs no code change.
 
 ## Deployment
 
-Railway project, two services:
+Railway: a Postgres, and the bot with root directory `bot/`. Migrations run at
+startup, and `PORT` being set is what turns the API on.
 
-- **Postgres** — Railway-provisioned, injects `DATABASE_URL`
-- **Bot** — long-running worker, no public domain or exposed port
-  - Root Directory: `bot/`
-  - Watch Paths: `bot/**`, so site edits do not trigger a redeploy
-  - Start: `python -m northernsteppes_bot`
+The bot refuses to start without `DISCORD_TOKEN` or `DATABASE_URL`, and
+refuses a token not shaped like a bot token. A bot that connects and finds
+zero members looks healthy in the logs while answering every question wrongly.
 
-Stack: Python 3.12, `discord.py`, `asyncpg`, `tomlkit`.
+Configuration is listed in [`README.md`](README.md).
 
-`tomlkit` is the load-bearing choice. The point of keeping records in git is a
-readable audit trail, and a non-style-preserving TOML library would reformat
-all 21 files on the first write, burying real changes in noise.
+## Backups
 
-### Configuration
-
-| Variable | Purpose |
-|---|---|
-| `DISCORD_TOKEN` | Bot token |
-| `DISCORD_GUILD_ID` | Guild for command registration |
-| `LEADERSHIP_ROLE_ID` | Role permitted to run write commands |
-| `DATABASE_URL` | Injected by Railway |
-| `GITHUB_APP_ID` / `GITHUB_INSTALLATION_ID` / `GITHUB_PRIVATE_KEY` | Repo write auth |
-| `SYNC_DEBOUNCE_SECONDS` | Default 300 |
-| `SYNC_ENABLED` | Kill switch |
-| `DRY_RUN` | Log diffs without committing |
-
-## Bootstrap
-
-A one-off idempotent import parses the 21 existing member files into Postgres.
-Git is the source of truth for this first load, and re-running it must be a
-no-op. Write commands stay disabled until it has run.
+Git no longer holds member records, so `backup.py` is how they leave the
+database — plain JSON, which survives a schema change and can be read without
+a database to hand. Restore upserts by slug and **never deletes**, so
+restoring an old snapshot over a live database cannot silently drop members
+recorded since it was taken.
 
 ## Open questions
 
-1. **Repo write access.** The bot must write to `jackhumbert/northernsteppes`,
-   which a fork cannot do. Preference is a GitHub App installed on the repo:
-   scoped to this repo alone, revocable, and not tied to anyone's personal
-   account. This currently blocks the sync path.
-2. **Year rollover.** `dues[current_year]` is evaluated at build time, so the
-   roster empties every January until dues are entered. Once `/dues` exists
-   that is less painful, but a grace period (prior year counts until, say,
-   March) or an explicit `active` flag would stop it recurring. Needs a call
-   from leadership on what "current member" should mean.
-3. **Bot-created members** — should `/member-add` create a file, or should new
-   members always be added by hand first?
-4. **Retiring race.** Race is a dead premise in the group, so there is no
-   `race` column. But three member files still carry one (kaigar and magnus
-   "Dwarf", meatwolf "DwarfGiant") and `templates/member.html:11` still
-   renders it as "Race: Dwarf" on their pages. Once the sync job runs it will
-   drop the field from those files and the template branch will simply stop
-   matching -- which works, but retires the feature by erosion. Cleaner to
-   remove the template line and the three frontmatter entries deliberately, as
-   its own change. `unit` was genuinely unused by any template and is now
-   `units text[]`.
+1. **`config.toml`'s `api_url` points at the test deployment.** It needs the
+   production bot's URL before this reaches northernsteppes.com.
+2. **Taking a backup from a laptop does not work.** `railway run` injects an
+   internal `DATABASE_URL` that resolves only inside Railway, and this
+   Postgres has no TCP proxy. Either give it one — which publishes the
+   database behind its password — or register an SSH key and use
+   `railway ssh`. See `README.md`.
+3. **Year rollover.** "Current member" means dues recorded for the calendar
+   year, so the roster empties every January until dues come in. Rank is
+   unaffected — it gates on having ever paid — but the roster split still
+   needs a call from leadership on whether a grace period should apply.
+4. **The class system**, its counters and flags, and per-member units are
+   defined but unwired. See [`../DEFERRED.md`](../DEFERRED.md).
